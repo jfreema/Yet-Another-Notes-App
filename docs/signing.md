@@ -30,9 +30,10 @@ Only the Apple Developer account holder can make one.
    login keychain.
 
 (Without Xcode: make a certificate signing request in **Keychain Access → Certificate Assistant → Request a Certificate
-From a Certificate Authority…**, upload it at
+From a Certificate Authority…**. At
 [developer.apple.com → Certificates](https://developer.apple.com/account/resources/certificates/add), choose
-**Developer ID Application**, and double-click the downloaded certificate.)
+**Developer ID Application**, then select **G2 Sub-CA** (Apple preselects Previous Sub-CA, which expires in 2027),
+upload the request, and double-click the downloaded certificate.)
 
 ## 2. Export it as a .p12
 
@@ -72,5 +73,8 @@ The team ID comes from the certificate, so it isn't a secret.
   different identity.
 - `downloads/latest.json` records the signing team. Once a Developer ID release is out, Check for Updates only installs
   updates signed by the same team, and the workflow refuses to publish anything else.
+- Apple usually notarizes in minutes, but a new team's first submissions can take hours. Test builds (pull requests, and
+  manual runs that don't publish) wait 15 minutes, then carry on unnotarized with a warning. A release waits an hour,
+  then stops without publishing, so re-run it once Apple has finished.
 - The certificate lasts five years. A renewed one from the same team keeps working with Check for Updates.
 - YANA asks for no macOS permissions, so changing how it's signed never makes anyone grant anything again.

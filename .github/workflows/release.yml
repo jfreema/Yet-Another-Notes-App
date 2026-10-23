@@ -26,7 +26,7 @@ concurrency:
 jobs:
   release:
     runs-on: macos-26
-    timeout-minutes: 40
+    timeout-minutes: 90  # notarizing a release can wait up to an hour
     steps:
       - uses: actions/checkout@v5
         with:
@@ -34,6 +34,8 @@ jobs:
 
       - name: Read the version
         id: version
+        env:
+          WANTS_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
           version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)"
           # Nothing is published before the first release
@@ -42,7 +44,9 @@ jobs:
           echo "Info.plist says $version, downloads/latest.json says $published (team: ${published_team:-none})"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "published_team=$published_team" >> "$GITHUB_OUTPUT"
-          if [[ "$version" != "$published" ]]; then echo "new=true" >> "$GITHUB_OUTPUT"; else echo "new=false" >> "$GITHUB_OUTPUT"; fi
+          # A new version is published when it's pushed to main, or when a manual run asks to
+          if [[ "$version" != "$published" && "$WANTS_PUBLISH" == true ]]; then publish=true; else publish=false; fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
       - name: Test
         run: |
@@ -73,9 +77,12 @@ jobs:
 
       - name: Build, sign and notarize
         env:
-          # Pull requests notarize too, so a test build opens just like a release
+          # Test builds notarize too, so they open just like a release. They wait 15 minutes for Apple, then carry on
+          # unnotarized. A release waits an hour, then stops rather than publish an unnotarized app.
           NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_TIMEOUT: ${{ steps.version.outputs.publish == 'true' && '60m' || '15m' }}
+          NOTARY_REQUIRED: ${{ steps.version.outputs.publish == 'true' && '1' || '' }}
         run: ./build.sh --release
 
       - name: Check it as Check for Updates will
@@ -107,7 +114,7 @@ jobs:
           path: downloads/YANA.zip
 
       - name: Publish
-        if: steps.version.outputs.new == 'true' && (github.event_name == 'push' || inputs.publish)
+        if: steps.version.outputs.publish == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
