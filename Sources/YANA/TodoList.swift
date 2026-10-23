@@ -143,7 +143,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         arrange(makeRow(ToDo(text: text)), at: rows.count)
         sender.stringValue = ""
         onChange?()
-        focus()
+        perform(#selector(focusLater), with: nil, afterDelay: 0)
         layoutSubtreeIfNeeded()
         addRow.scrollToVisible(addRow.bounds)
     }
