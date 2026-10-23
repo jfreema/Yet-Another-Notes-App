@@ -4,6 +4,22 @@ Releases are signed with a **Developer ID Application** certificate and notarize
 without a Gatekeeper warning. This doesn't involve the App Store. The Release workflow does both when the four secrets
 below are set, and signs ad hoc when they aren't.
 
+## The quick way
+
+On your Mac, run the setup script once:
+
+```sh
+zsh scripts/setup-signing.sh
+```
+
+It makes the private key and a signing request, opens Apple's site for you to turn the request into a certificate,
+packages the certificate as a .p12 with a random password, asks for an app-specific password (hidden as you paste it)
+and checks it with Apple, then adds all four secrets to the repo. With the GitHub CLI (`brew install gh`, then
+`gh auth login`) it adds them itself; without it, it opens GitHub's page and puts each one on your clipboard to paste.
+Your login keychain keeps a copy of the certificate as the backup. You only sign in to Apple, twice.
+
+The steps below are the same thing by hand.
+
 ## 1. Make the Developer ID Application certificate (once)
 
 Only the Apple Developer account holder can make one.
