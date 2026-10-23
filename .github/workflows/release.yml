@@ -73,9 +73,9 @@ jobs:
 
       - name: Build, sign and notarize
         env:
-          # Pull requests skip notarizing, which can take minutes
-          NOTARY_APPLE_ID: ${{ github.event_name != 'pull_request' && secrets.NOTARY_APPLE_ID || '' }}
-          NOTARY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.NOTARY_PASSWORD || '' }}
+          # Pull requests notarize too, so a test build opens just like a release
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
         run: ./build.sh --release
 
       - name: Check it as Check for Updates will
@@ -104,9 +104,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: YANA-${{ steps.version.outputs.version }}
-          path: |
-            downloads/YANA.zip
-            downloads/latest.json
+          path: downloads/YANA.zip
 
       - name: Publish
         if: steps.version.outputs.new == 'true' && (github.event_name == 'push' || inputs.publish)
