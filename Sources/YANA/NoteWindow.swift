@@ -1,10 +1,16 @@
 import AppKit
 
-/// The one note: a window that hides to the menu bar when closed
+/// The note window: up to four tabs of notes and to-do lists. Closing it hides it to the menu bar.
 @MainActor
-final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate {
+final class NoteWindowController: NSObject, NSWindowDelegate {
     let window: NSWindow
-    private let textView: NSTextView
+    private let tabBar = TabBar()
+    private let pageArea = NSView()
+    private lazy var tabsShown = pageArea.topAnchor.constraint(equalTo: tabBar.bottomAnchor)
+    private lazy var tabsHidden = pageArea.topAnchor.constraint(equalTo: tabBar.topAnchor)
+    private var pages: [NotePage] = []
+    private var selected = 0
+    private let newButton = NSButton()
     private let pinButton = NSButton()
     private let menuButton = NSButton()
     private let opacitySlider = NSSlider()
@@ -15,8 +21,11 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
 
     private enum Key {
         static let pinned = "pinned"
+        static let sticky = "sticky"
         static let opacity = "opacity"
         static let textSize = "textSize"
+        static let selected = "selectedNote"
+        static let narrowed = "narrowed"
         static let frame = "NoteWindow"
     }
 
@@ -31,45 +40,84 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
         }
     }
 
+    /// Post-it yellow with black, hand-lettered text
+    var isSticky: Bool {
+        get { UserDefaults.standard.bool(forKey: Key.sticky) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Key.sticky)
+            applyLook()
+        }
+    }
+
+    var count: Int { pages.count }
+
     override init() {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 440),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 304, height: 440),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        let scroll = NSTextView.scrollableTextView()
-        textView = scroll.documentView as! NSTextView
         super.init()
 
         window.title = "YANA"
+        // The tabs name the notes, and a title wouldn't fit beside the controls
+        window.titleVisibility = .hidden
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.minSize = NSSize(width: 260, height: 160)
+        window.minSize = NSSize(width: 240, height: 160)
         // Comes to the desktop you're on, and over full-screen apps when kept on top
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        window.contentView = scroll
+        window.contentView = makeContent()
         window.addTitlebarAccessoryViewController(makeAccessory())
+        placeWindow()
 
-        textView.isRichText = false
-        textView.allowsUndo = true
-        textView.usesFindBar = true
-        textView.isIncrementalSearchingEnabled = true
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.textContainerInset = NSSize(width: 8, height: 10)
-        textView.font = .systemFont(ofSize: textSize)
-        textView.string = store.load()
-        textView.delegate = self
-
-        // Where it was last time, else under the menu bar's right side
-        if !window.setFrameUsingName(Key.frame) {
-            if let screen = NSScreen.main?.visibleFrame {
-                window.setFrameTopLeftPoint(NSPoint(x: screen.maxX - window.frame.width - 80, y: screen.maxY - 8))
-            }
-        }
-        window.setFrameAutosaveName(Key.frame)
+        tabBar.onSelect = { [unowned self] in self.select($0) }
+        tabBar.onDelete = { [unowned self] in self.deleteNote(at: $0) }
+        pages = store.load().map { makePage($0) }
 
         let opacity = UserDefaults.standard.object(forKey: Key.opacity) as? Double ?? 1
         opacitySlider.doubleValue = opacity
         window.alphaValue = opacity
         applyPinned()
+        applyLook()
+        select(min(max(UserDefaults.standard.integer(forKey: Key.selected), 0), pages.count - 1))
+    }
+
+    private func makeContent() -> NSView {
+        let content = NSView()
+        for view in [tabBar, pageArea] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(view)
+        }
+        tabBar.isHidden = true
+        NSLayoutConstraint.activate([
+            tabBar.topAnchor.constraint(equalTo: content.topAnchor),
+            tabBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            tabBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            pageArea.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            pageArea.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            pageArea.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            tabsHidden,
+        ])
+        return content
+    }
+
+    /// Where it was last time, else under the menu bar's right side
+    private func placeWindow() {
+        if window.setFrameUsingName(Key.frame) {
+            // 1.1 made the note narrower, so a note placed by 1.0 narrows too, keeping its right edge where it was
+            if !UserDefaults.standard.bool(forKey: Key.narrowed) {
+                var frame = window.frame
+                let width = max(window.minSize.width, (frame.width * 0.8).rounded())
+                frame.origin.x += frame.width - width
+                frame.size.width = width
+                window.setFrame(frame, display: false)
+                window.saveFrame(usingName: Key.frame)
+            }
+        } else if let screen = NSScreen.main?.visibleFrame {
+            window.setFrameTopLeftPoint(NSPoint(x: screen.maxX - window.frame.width - 80, y: screen.maxY - 8))
+        }
+        UserDefaults.standard.set(true, forKey: Key.narrowed)
+        window.setFrameAutosaveName(Key.frame)
     }
 
     // MARK: Showing and hiding
@@ -86,7 +134,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
         if NSApp.isHidden { NSApp.unhide(nil) }
         NSApp.activateRegardless()
         window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(textView)
+        pages[selected].focus()
     }
 
     func hide() {
@@ -106,9 +154,83 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
         save()
     }
 
+    // MARK: Tabs
+
+    func newNote(_ kind: Note.Kind) {
+        guard pages.count < Note.limit else {
+            NSSound.beep()
+            return
+        }
+        pages.append(makePage(Note(kind: kind)))
+        select(pages.count - 1)
+        show()
+        save()
+    }
+
+    func select(_ index: Int) {
+        guard pages.indices.contains(index) else { return }
+        selected = index
+        UserDefaults.standard.set(index, forKey: Key.selected)
+        let view = pages[index].view
+        if view.superview !== pageArea {
+            pageArea.subviews.forEach { $0.removeFromSuperview() }
+            view.translatesAutoresizingMaskIntoConstraints = false
+            pageArea.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.topAnchor.constraint(equalTo: pageArea.topAnchor),
+                view.bottomAnchor.constraint(equalTo: pageArea.bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: pageArea.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: pageArea.trailingAnchor),
+            ])
+            // Undo stays with the tab it's for
+            window.undoManager?.removeAllActions()
+        }
+        updateTabs()
+        if window.isVisible { pages[index].focus() }
+    }
+
+    /// Asks first, unless there's nothing in it
+    func deleteNote(at index: Int) {
+        guard pages.count > 1, pages.indices.contains(index) else { return }
+        let note = pages[index].note
+        if !note.isEmpty {
+            let what = note.kind == .list ? "to-do list" : "note"
+            guard Alert.confirm("Delete “\(note.title)”?", "The \(what) can't be brought back.", button: "Delete",
+                                cancel: "Cancel") else { return }
+        }
+        pages.remove(at: index)
+        select(index < selected ? selected - 1 : min(selected, pages.count - 1))
+        save()
+    }
+
+    private func makePage(_ note: Note) -> NotePage {
+        let page: NotePage = switch note.kind {
+        case .text: TextPage(text: note.text)
+        case .list: TodoList(items: note.items)
+        }
+        page.apply(look)
+        page.onChange = { [unowned self] in self.noteChanged() }
+        return page
+    }
+
+    /// Shows the tabs once there's more than one note, named for what's in them
+    private func updateTabs() {
+        let notes = pages.map { $0.note }
+        let showTabs = notes.count > 1
+        if tabBar.isHidden == showTabs {
+            tabBar.isHidden = !showTabs
+            (showTabs ? tabsHidden : tabsShown).isActive = false
+            (showTabs ? tabsShown : tabsHidden).isActive = true
+        }
+        tabBar.show(notes, selected: selected)
+        newButton.isEnabled = notes.count < Note.limit
+        newButton.toolTip = newButton.isEnabled ? "New note or to-do list" : "YANA holds up to \(Note.limit) notes"
+    }
+
     // MARK: Saving
 
-    func textDidChange(_ notification: Notification) {
+    private func noteChanged() {
+        updateTabs()
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.save() }
@@ -118,12 +240,13 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
     func save() {
         saveTimer?.invalidate()
         saveTimer = nil
-        store.save(textView.string)
+        store.save(pages.map { $0.note })
     }
 
     // MARK: Title bar controls
 
     private func makeAccessory() -> NSTitlebarAccessoryViewController {
+        configure(newButton, symbol: "plus", tip: "New note or to-do list", action: #selector(showNewMenu))
         configure(menuButton, symbol: "ellipsis.circle", tip: "YANA options", action: #selector(showMenu))
 
         configure(pinButton, symbol: "pin", tip: "Keep on top of other windows", action: #selector(pinClicked))
@@ -138,19 +261,20 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
         opacitySlider.action = #selector(opacityChanged)
         opacitySlider.toolTip = "Transparency"
         opacitySlider.setAccessibilityLabel("Transparency")
-        opacitySlider.widthAnchor.constraint(equalToConstant: 90).isActive = true
+        opacitySlider.widthAnchor.constraint(equalToConstant: 70).isActive = true
 
         let dim = NSImageView(image: NSImage(systemSymbolName: "circle.lefthalf.filled",
                                              accessibilityDescription: nil) ?? NSImage())
         dim.contentTintColor = .secondaryLabelColor
         dim.toolTip = "Transparency"
 
-        let stack = NSStackView(views: [menuButton, pinButton, dim, opacitySlider])
+        let stack = NSStackView(views: [newButton, menuButton, pinButton, dim, opacitySlider])
         stack.orientation = .horizontal
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 190, height: 28))
+        let width = max(stack.fittingSize.width, 170) + 10
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 28))
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
@@ -170,6 +294,26 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
         button.toolTip = tip
         button.target = self
         button.action = action
+    }
+
+    @objc private func showNewMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+        let note = NSMenuItem(title: "New Note", action: #selector(newTextNote), keyEquivalent: "n")
+        let list = NSMenuItem(title: "New To-Do List", action: #selector(newList), keyEquivalent: "n")
+        list.keyEquivalentModifierMask = [.command, .shift]
+        for item in [note, list] {
+            item.target = self
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
+    }
+
+    @objc private func newTextNote() {
+        newNote(.text)
+    }
+
+    @objc private func newList() {
+        newNote(.list)
     }
 
     @objc private func showMenu(_ sender: NSButton) {
@@ -196,7 +340,18 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
             : "Keep on top of other windows"
     }
 
-    // MARK: Text size
+    // MARK: Look
+
+    private var look: Look { Look(textSize: textSize, sticky: isSticky) }
+
+    /// Sticky note mode turns the whole window yellow, in light mode whatever the Mac uses
+    private func applyLook() {
+        let look = self.look
+        window.appearance = look.sticky ? NSAppearance(named: .aqua) : nil
+        window.titlebarAppearsTransparent = look.sticky
+        window.backgroundColor = look.sticky ? .stickyYellow : .windowBackgroundColor
+        pages.forEach { $0.apply(look) }
+    }
 
     private var textSize: CGFloat {
         let size = UserDefaults.standard.double(forKey: Key.textSize)
@@ -213,6 +368,6 @@ final class NoteWindowController: NSObject, NSWindowDelegate, NSTextViewDelegate
 
     private func setTextSize(_ size: CGFloat) {
         UserDefaults.standard.set(Double(size), forKey: Key.textSize)
-        textView.font = .systemFont(ofSize: size)
+        applyLook()
     }
 }

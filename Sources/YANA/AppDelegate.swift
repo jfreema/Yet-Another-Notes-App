@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         menu.addItem(item("Show Note", #selector(showNote)))
         menu.addItem(item("Keep on Top", #selector(togglePinned), tag: Tag.pinned))
+        menu.addItem(item("Sticky Note Mode", #selector(toggleSticky), tag: Tag.sticky))
         menu.addItem(.separator())
         menu.addItem(item("Open at Login", #selector(toggleOpenAtLogin), tag: Tag.openAtLogin))
         menu.addItem(.separator())
@@ -72,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum Tag {
         static let pinned = 1
         static let openAtLogin = 2
+        static let sticky = 3
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "", tag: Int = 0) -> NSMenuItem {
@@ -83,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.item(withTag: Tag.pinned)?.state = note.isPinned ? .on : .off
+        menu.item(withTag: Tag.sticky)?.state = note.isSticky ? .on : .off
         menu.item(withTag: Tag.openAtLogin)?.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
@@ -92,6 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func togglePinned() {
         note.isPinned.toggle()
+    }
+
+    @objc func toggleSticky() {
+        note.isSticky.toggle()
     }
 
     @objc func toggleOpenAtLogin() {
@@ -140,6 +147,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func biggerText() { note.changeTextSize(by: 1) }
     @objc func smallerText() { note.changeTextSize(by: -1) }
     @objc func actualSizeText() { note.resetTextSize() }
+
+    // MARK: Tabs, from the File and Window menus
+
+    @objc func newNote() { note.newNote(.text) }
+    @objc func newList() { note.newNote(.list) }
+    @objc func showTab(_ sender: NSMenuItem) { note.select(sender.tag) }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(newNote), #selector(newList):
+            note.count < Note.limit
+        case #selector(showTab(_:)):
+            menuItem.tag < note.count
+        default:
+            true
+        }
+    }
 }
 
 enum Alert {

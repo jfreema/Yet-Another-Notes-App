@@ -1,29 +1,49 @@
 import Foundation
 
-/// The note's text, in ~/Library/Application Support/YANA/Note.txt
+/// The notes, in ~/Library/Application Support/YANA/Notes.json. YANA 1.0 kept a single note in Note.txt, which becomes
+/// the first tab.
 struct NoteStore {
-    let file: URL
+    let folder: URL
 
-    init(file: URL = NoteStore.defaultFile) {
-        self.file = file
+    init(folder: URL = NoteStore.defaultFolder) {
+        self.folder = folder
     }
 
-    static var defaultFile: URL {
+    static var defaultFolder: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return support.appendingPathComponent("YANA", isDirectory: true).appendingPathComponent("Note.txt")
+        return support.appendingPathComponent("YANA", isDirectory: true)
     }
 
-    func load() -> String {
-        (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    var file: URL { folder.appendingPathComponent("Notes.json") }
+    /// Where 1.0 kept its note
+    var oldFile: URL { folder.appendingPathComponent("Note.txt") }
+
+    func load() -> [Note] {
+        if let data = try? Data(contentsOf: file) {
+            do {
+                let notes = try JSONDecoder().decode([Note].self, from: data)
+                if !notes.isEmpty { return notes }
+            } catch {
+                // Keeps a copy, since the next save writes over it
+                logger.error("Couldn't read the notes: \(error.localizedDescription, privacy: .public)")
+                let copy = folder.appendingPathComponent("Notes (unreadable \(Int(Date().timeIntervalSince1970))).json")
+                try? FileManager.default.copyItem(at: file, to: copy)
+            }
+        }
+        let text = (try? String(contentsOf: oldFile, encoding: .utf8)) ?? ""
+        return [Note(kind: .text, text: text)]
     }
 
-    func save(_ text: String) {
-        guard text != load() else { return }
+    func save(_ notes: [Note]) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         do {
-            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try text.write(to: file, atomically: true, encoding: .utf8)
+            let data = try encoder.encode(notes)
+            guard data != (try? Data(contentsOf: file)) else { return }
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: file, options: .atomic)
         } catch {
-            logger.error("Couldn't save the note: \(error.localizedDescription, privacy: .public)")
+            logger.error("Couldn't save the notes: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

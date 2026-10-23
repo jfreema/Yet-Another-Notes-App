@@ -12,6 +12,10 @@ enum MainMenu {
         app.addItem(.separator())
         app.addItem(item("Quit YANA", #selector(AppDelegate.quit), "q", target: target))
 
+        let file = submenu(main, "File")
+        file.addItem(item("New Note", #selector(AppDelegate.newNote), "n", target: target))
+        file.addItem(item("New To-Do List", #selector(AppDelegate.newList), "n", [.command, .shift], target: target))
+
         let edit = submenu(main, "Edit")
         edit.addItem(item("Undo", Selector(("undo:")), "z"))
         edit.addItem(item("Redo", Selector(("redo:")), "z", [.command, .shift]))
@@ -44,6 +48,14 @@ enum MainMenu {
 
         let window = submenu(main, "Window")
         window.addItem(item("Keep on Top", #selector(AppDelegate.togglePinned), "t", [.command, .option], target: target))
+        window.addItem(.separator())
+        // ⌘1 to ⌘4 go to the tabs
+        for number in 1...Note.limit {
+            let tab = item("Note \(number)", #selector(AppDelegate.showTab(_:)), "\(number)", target: target)
+            tab.tag = number - 1
+            window.addItem(tab)
+        }
+        window.addItem(.separator())
         window.addItem(item("Close", #selector(NSWindow.performClose(_:)), "w"))
         return main
     }
