@@ -6,7 +6,7 @@
 
 <p align="center"><a href="https://github.com/jfreema/Yet-Another-Notes-App/raw/main/downloads/YANA.zip"><b>Download YANA</b></a></p>
 
-<p align="center">Version 1.0.0 · macOS 14 or later · Apple silicon or Intel</p>
+<p align="center">Version 1.1.0 · macOS 14 or later · Apple silicon or Intel</p>
 
 ## Install
 
