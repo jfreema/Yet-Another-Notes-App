@@ -2,7 +2,7 @@
 
 <h1 align="center">YANA</h1>
 
-<p align="center">Yet Another Notes App: one quick note that lives in your Mac's menu bar.</p>
+<p align="center">Yet Another Notes App: quick notes and to-do lists that live in your Mac's menu bar.</p>
 
 <p align="center"><a href="https://github.com/jfreema/Yet-Another-Notes-App/raw/main/downloads/YANA.zip"><b>Download YANA</b></a></p>
 
@@ -19,17 +19,20 @@
 
 - **Click the icon** in the menu bar to show your note, and click it again to put it away. Whatever you type is saved as you go.
 - **Click the ×** (or press ⌘W) and the note goes back to the menu bar. Nothing is lost.
+- **Tabs:** click **+** at the top right for a new note or to-do list, up to four. The tabs show once there's more than one, named for what's at the top of each. Right-click a tab to delete it. ⌘1 to ⌘4 switch tabs, and ⌘N and ⇧⌘N add a note or a list.
+- **To-do lists:** type a task in the last row and press Return. Check it off and it's crossed out, with an × beside it that deletes it. Check it again to bring it back. Click a task to edit it, or drag it up or down to put it where you want.
+- **Sticky note mode:** turn it on in the **…** menu for post-it yellow with black, hand-lettered text.
 - **Keep on top:** click the pin at the top right of the note, and it stays above other windows. Unpinned, it falls behind whatever window you click next.
 - **Transparency:** drag the slider at the top right of the note to see through it.
 - **Text size:** ⌘+ and ⌘- make the text bigger and smaller, and ⌘0 puts it back.
-- **Find:** ⌘F searches the note.
-- **Options:** right-click the menu bar icon, or click **…** on the note, for **Keep on Top**, **Open at Login**, **About YANA**, **Check for Updates…** and **Quit YANA**.
+- **Find:** ⌘F searches a note.
+- **Options:** right-click the menu bar icon, or click **…** on the note, for **Keep on Top**, **Sticky Note Mode**, **Open at Login**, **About YANA**, **Check for Updates…** and **Quit YANA**.
 
-The note is plain text, kept in `~/Library/Application Support/YANA/Note.txt`.
+Your notes are kept in `~/Library/Application Support/YANA/Notes.json`.
 
 ## Updates
 
-Choose **Check for Updates…**. If there's a newer version, YANA downloads it from this repo, checks it, replaces itself in place and restarts. Your note and settings stay as they are.
+Choose **Check for Updates…**. If there's a newer version, YANA downloads it from this repo, checks it, replaces itself in place and restarts. Your notes and settings stay as they are.
 
 ## For developers
 

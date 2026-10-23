@@ -4,8 +4,9 @@ Notes for any coding agent working on YANA.
 
 ## What YANA is
 
-A macOS menu bar app with one plain-text note. Clicking the menu bar icon shows the note, and closing it hides it back
-to the menu bar. The note can be kept on top, and a slider sets its transparency. It's Swift with SwiftPM, with no Xcode
+A macOS menu bar app with up to four tabs of plain-text notes and to-do lists. Clicking the menu bar icon shows the
+note window, and closing it hides it back to the menu bar. The window can be kept on top, a slider sets its
+transparency, and sticky note mode makes it post-it yellow. It's Swift with SwiftPM, with no Xcode
 project and no third-party dependencies, for macOS 14 or later on Apple silicon or Intel. It's an accessory app
 (`LSUIElement`), with no Dock icon. [README.md](README.md) is the user guide.
 
@@ -27,9 +28,13 @@ Everything must build with the Command Line Tools alone, without Xcode.
 |---|---|
 | Launch, one copy at a time | `YANA` |
 | Menu bar icon, its menu, About, Open at Login | `AppDelegate` |
-| Keyboard shortcuts (Edit, Find, text size, ⌘W) | `MainMenu` |
-| The note window, pin and transparency slider | `NoteWindow` |
-| Saving the note | `NoteStore` |
+| Keyboard shortcuts (new tab, Edit, Find, text size, ⌘1–⌘4, ⌘W) | `MainMenu` |
+| The note window: tabs, pin, transparency slider, sticky note mode | `NoteWindow` |
+| The tab strip | `TabBar` |
+| A text tab, and how tabs look (`Look`: font and colors, sticky or not) | `Pages` |
+| A to-do list tab, its rows, and dragging them | `TodoList` |
+| What a tab holds | `Note` |
+| Saving the notes to `Notes.json` | `NoteStore` |
 | Check for Updates | `Updater` |
 
 ## Things that bite
@@ -39,6 +44,12 @@ Everything must build with the Command Line Tools alone, without Xcode.
 - **Keep on Top** is the window's level (`.floating`). Unpinned it's `.normal`, so it falls behind the next window
   clicked.
 - **An accessory app still needs a main menu** for ⌘C, ⌘V, ⌘Z and the rest to work in the note.
+- **A task's text doesn't take a click until it's being edited.** `ToDoRow.hitTest` sends the click to the row, and
+  `TodoList.track` turns it into editing on mouse up, or a drag once the mouse moves.
+- **Deleting a task waits a turn** (`perform(_:with:afterDelay:)`), since its × or text is still handling the event.
+- **Sticky note mode forces the light appearance** on the window, so dark mode doesn't fight the yellow.
+- **1.0 kept one note in `Note.txt`.** `NoteStore` turns it into the first tab when there's no `Notes.json`, and
+  leaves the file where it is.
 - **Activation:** since macOS 14, `NSApp.activate()` is a request macOS can turn down, so alerts and the About panel
   use `NSApp.activateRegardless()`.
 
