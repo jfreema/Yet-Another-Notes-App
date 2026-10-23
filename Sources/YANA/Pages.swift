@@ -18,12 +18,12 @@ struct Look {
     var textSize: CGFloat
     var sticky: Bool
 
-    /// Sticky notes are written in Noteworthy, which looks hand-lettered but printed. It runs small, so it's a little
-    /// bigger.
+    /// Sticky notes are written in Chalkboard SE, which looks hand-lettered but neatly printed. It runs small, so it's
+    /// a little bigger.
     var font: NSFont {
         guard sticky else { return .systemFont(ofSize: textSize) }
-        let size = (textSize * 1.15).rounded()
-        return NSFont(name: "Noteworthy-Light", size: size) ?? NSFont(name: "ChalkboardSE-Regular", size: size)
+        let size = (textSize * 1.2).rounded()
+        return NSFont(name: "ChalkboardSE-Regular", size: size) ?? NSFont(name: "Noteworthy-Bold", size: size)
             ?? .systemFont(ofSize: textSize)
     }
 
@@ -33,8 +33,8 @@ struct Look {
 }
 
 extension NSColor {
-    /// Post-it yellow, for sticky note mode
-    static let stickyYellow = NSColor(srgbRed: 1, green: 0.96, blue: 0.62, alpha: 1)
+    /// Post-it yellow, toned down a little so it doesn't glare, for sticky note mode
+    static let stickyYellow = NSColor(srgbRed: 0.97, green: 0.93, blue: 0.64, alpha: 1)
 }
 
 /// A tab of plain text
