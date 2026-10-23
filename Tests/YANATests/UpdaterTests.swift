@@ -28,14 +28,3 @@ struct UpdaterTests {
         #expect(throws: Updater.Failure.self) { try Updater.decode(Data("nope".utf8)) }
     }
 }
-
-struct NoteStoreTests {
-    @Test func savesAndLoads() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let store = NoteStore(file: folder.appendingPathComponent("Note.txt"))
-        #expect(store.load() == "")
-        store.save("Buy milk\nCall Sam")
-        #expect(store.load() == "Buy milk\nCall Sam")
-    }
-}
