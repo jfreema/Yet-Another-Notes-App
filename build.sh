@@ -52,24 +52,37 @@ else
 fi
 echo "Built $APP (signed $SIGNED_BY)"
 
-# Notarizes with an app-specific password, so Gatekeeper opens it without a warning
+# Notarizes with an app-specific password, so Gatekeeper opens it without a warning. Apple usually takes minutes, but a
+# new team's first submissions can take hours. Then NOTARY_REQUIRED (releases) stops here, and anything else carries on
+# unnotarized.
 NOTARIZED=false
 if [[ -n "$TEAM" && -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_PASSWORD:-}" ]]; then
+    notary() { xcrun notarytool "$@" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$TEAM" }
     ditto -c -k --keepParent "$APP" build/notarize.zip
-    result="$(xcrun notarytool submit build/notarize.zip --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" \
-        --team-id "$TEAM" --wait --timeout 20m --output-format json)" || true
+    # The result goes to stdout, or to stderr when the wait runs out
+    notary submit build/notarize.zip --wait --timeout "${NOTARY_TIMEOUT:-60m}" --output-format json \
+        > build/notary.out 2>&1 || true
     rm -f build/notarize.zip
-    echo "$result"
-    if [[ "$(echo "$result" | plutil -extract status raw -o - -)" != "Accepted" ]]; then
-        id="$(echo "$result" | plutil -extract id raw -o - - || true)"
-        [[ -n "$id" ]] && xcrun notarytool log "$id" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" \
-            --team-id "$TEAM" || true
-        echo "Notarization failed" >&2
+    cat build/notary.out
+    STATUS="$(sed -nE 's/.*"status" *: *"([^"]+)".*/\1/p' build/notary.out | head -1)"
+    SUBMISSION="$(sed -nE 's/.*"id" *: *"([0-9a-fA-F-]{36})".*/\1/p' build/notary.out | head -1)"
+    if [[ "$STATUS" == "Accepted" ]]; then
+        xcrun stapler staple "$APP"
+        NOTARIZED=true
+        echo "Notarized and stapled"
+    elif [[ -n "$SUBMISSION" && ( -z "$STATUS" || "$STATUS" == "In Progress" ) ]]; then
+        echo "Apple is still notarizing submission $SUBMISSION. Its recent submissions:"
+        notary history 2>&1 | head -12 || true
+        if [[ -n "${NOTARY_REQUIRED:-}" ]]; then
+            echo "Stopping rather than publishing it unnotarized. Run this again once Apple finishes." >&2
+            exit 1
+        fi
+        echo "::warning::Apple hasn't finished notarizing submission $SUBMISSION yet, so this build isn't notarized."
+    else
+        [[ -n "$SUBMISSION" ]] && notary log "$SUBMISSION" || true
+        echo "Notarization failed${STATUS:+ ($STATUS)}" >&2
         exit 1
     fi
-    xcrun stapler staple "$APP"
-    NOTARIZED=true
-    echo "Notarized and stapled"
 elif [[ -n "$TEAM" ]]; then
     echo "Not notarized: set NOTARY_APPLE_ID and NOTARY_PASSWORD to notarize."
 fi
