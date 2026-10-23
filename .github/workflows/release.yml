@@ -1,0 +1,128 @@
+name: Release
+
+# Tests, builds, signs and checks YANA. When a push to main changes Resources/Info.plist to a new version, it also
+# publishes it: commits downloads/YANA.zip, downloads/latest.json and the README's version line to main, which is where
+# Check for Updates looks. Pull requests and manual runs build without publishing, unless a manual run asks to.
+
+on:
+  push:
+    branches: [main]
+    paths: [Resources/Info.plist]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish, if the version is new
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 90  # notarizing a release can wait up to an hour
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # so Publish can rebase onto anything pushed meanwhile
+
+      - name: Read the version
+        id: version
+        env:
+          WANTS_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+        run: |
+          version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)"
+          # Nothing is published before the first release
+          published="$(plutil -extract version raw -o - downloads/latest.json 2>/dev/null || echo none)"
+          published_team="$(plutil -extract team raw -o - downloads/latest.json 2>/dev/null || true)"
+          echo "Info.plist says $version, downloads/latest.json says $published (team: ${published_team:-none})"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "published_team=$published_team" >> "$GITHUB_OUTPUT"
+          # A new version is published when it's pushed to main, or when a manual run asks to
+          if [[ "$version" != "$published" && "$WANTS_PUBLISH" == true ]]; then publish=true; else publish=false; fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: |
+          swift --version
+          swift test
+
+      - name: Import the Developer ID certificate
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          if [[ -z "$DEVELOPER_ID_P12" ]]; then
+            echo "::warning::No DEVELOPER_ID_P12 secret, so this build is signed ad hoc. See docs/signing.md."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          echo "$DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/signing.p12"
+          # Uses it without asking: nobody is here to answer
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Build, sign and notarize
+        env:
+          # Test builds notarize too, so they open just like a release. They wait 15 minutes for Apple, then carry on
+          # unnotarized. A release waits an hour, then stops rather than publish an unnotarized app.
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_TIMEOUT: ${{ steps.version.outputs.publish == 'true' && '60m' || '15m' }}
+          NOTARY_REQUIRED: ${{ steps.version.outputs.publish == 'true' && '1' || '' }}
+        run: ./build.sh --release
+
+      - name: Check it as Check for Updates will
+        run: |
+          expanded="$RUNNER_TEMP/expanded"
+          ditto -x -k downloads/YANA.zip "$expanded"
+          app="$expanded/YANA.app"
+          plist="$app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$plist")" = "${{ steps.version.outputs.version }}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$plist")" = io.github.jfreema.yana
+          codesign --verify --deep --strict "$app"
+          test "$(plutil -extract sha256 raw -o - downloads/latest.json)" = "$(shasum -a 256 downloads/YANA.zip | cut -d' ' -f1)"
+          team="$(plutil -extract team raw -o - downloads/latest.json 2>/dev/null || true)"
+          published_team="${{ steps.version.outputs.published_team }}"
+          # Once a Developer ID release is out, Check for Updates refuses anything else, so don't publish it
+          if [[ -n "$published_team" && "$team" != "$published_team" ]]; then
+            echo "::error::Signed by '${team:-ad hoc}', but published releases are signed by team $published_team"
+            exit 1
+          fi
+          if [[ "$(plutil -extract notarized raw -o - downloads/latest.json)" == "true" ]]; then
+            spctl --assess --type execute --verbose "$app"
+          fi
+          echo "YANA ${{ steps.version.outputs.version }} for $(lipo -archs "$app/Contents/MacOS/YANA") checks out (team: ${team:-ad hoc})"
+
+      - name: Keep the build with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: YANA-${{ steps.version.outputs.version }}
+          path: downloads/YANA.zip
+
+      - name: Publish
+        if: steps.version.outputs.publish == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add downloads/YANA.zip downloads/latest.json README.md
+          git commit -m "Release ${{ steps.version.outputs.version }}"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
