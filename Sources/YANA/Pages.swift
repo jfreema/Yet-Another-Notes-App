@@ -30,6 +30,8 @@ struct Look {
     var textColor: NSColor { sticky ? .black : .textColor }
     var doneColor: NSColor { sticky ? NSColor(white: 0, alpha: 0.45) : .secondaryLabelColor }
     var background: NSColor { sticky ? .stickyYellow : .textBackgroundColor }
+    var lineNumberColor: NSColor { sticky ? NSColor(white: 0, alpha: 0.35) : .tertiaryLabelColor }
+    var currentLineNumberColor: NSColor { sticky ? .black : .labelColor }
 }
 
 extension NSColor {
@@ -42,6 +44,7 @@ extension NSColor {
 final class TextPage: NSObject, NotePage, NSTextViewDelegate {
     let view: NSView
     private let textView: NSTextView
+    private let lineNumbers: LineNumberRuler
     private let defaultCaret: NSColor
     var onChange: (() -> Void)?
 
@@ -51,7 +54,12 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
         view = scroll
         self.textView = textView
         defaultCaret = textView.insertionPointColor
+        lineNumbers = LineNumberRuler(textView: textView, scrollView: scroll)
         super.init()
+
+        scroll.verticalRulerView = lineNumbers
+        scroll.hasVerticalRuler = true
+        scroll.rulersVisible = true
 
         textView.isRichText = false
         textView.allowsUndo = true
@@ -76,6 +84,7 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
         textView.backgroundColor = look.background
         (view as? NSScrollView)?.backgroundColor = look.background
         textView.insertionPointColor = look.sticky ? .black : defaultCaret
+        lineNumbers.apply(look)
     }
 
     func textDidChange(_ notification: Notification) {

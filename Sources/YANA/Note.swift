@@ -39,6 +39,28 @@ struct Note: Codable, Equatable {
         return String(first.prefix(40))
     }
 
+    /// What goes in a .txt file: a note's text, or a list's tasks one to a line, checked off with [x]
+    var plainText: String {
+        switch kind {
+        case .text: text
+        case .list: items.map { "\($0.done ? "[x]" : "[ ]") \($0.text)" }.joined(separator: "\n") + "\n"
+        }
+    }
+
+    /// A text file's contents: UTF-8 or UTF-16 when it says so, else Windows Latin, which reads anything
+    static func text(fromFile data: Data) -> String {
+        var text: String
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]) {
+            text = String(data: data, encoding: .utf16) ?? ""
+        } else if let utf8 = String(data: data, encoding: .utf8) {
+            text = utf8
+        } else {
+            text = String(data: data, encoding: .windowsCP1252) ?? String(decoding: data, as: UTF8.self)
+        }
+        if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
+        return text.replacingOccurrences(of: "\r\n", with: "\n")
+    }
+
     var isEmpty: Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && items.isEmpty
     }
