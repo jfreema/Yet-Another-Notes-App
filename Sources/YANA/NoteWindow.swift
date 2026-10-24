@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// The note window: up to four tabs of notes and to-do lists. Closing it hides it to the menu bar.
 @MainActor
@@ -201,6 +202,73 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         pages.remove(at: index)
         select(index < selected ? selected - 1 : min(selected, pages.count - 1))
         save()
+    }
+
+    // MARK: Text files
+
+    /// Opens a text file into the tab you're on if it's an empty note, else into a new tab. With four tabs already, it
+    /// offers to replace the one you're on.
+    func openTextFile() {
+        show()
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a text file to open in YANA"
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            MainActor.assumeIsolated { self?.open(url) }
+        }
+    }
+
+    private func open(_ url: URL) {
+        let text: String
+        do {
+            text = Note.text(fromFile: try Data(contentsOf: url))
+        } catch {
+            logger.error("Couldn't open a text file: \(error.localizedDescription, privacy: .public)")
+            Alert.show("Couldn't open “\(url.lastPathComponent)”", error.localizedDescription)
+            return
+        }
+        let page = makePage(Note(kind: .text, text: text))
+        let current = pages[selected].note
+        if current.kind == .text && current.isEmpty {
+            pages[selected] = page
+            select(selected)
+        } else if pages.count < Note.limit {
+            pages.append(page)
+            select(pages.count - 1)
+        } else {
+            guard Alert.confirm("Replace “\(current.title)” with “\(url.lastPathComponent)”?",
+                                "YANA holds up to \(Note.limit) notes. What's in this one can't be brought back.",
+                                button: "Replace", cancel: "Cancel") else { return }
+            pages[selected] = page
+            select(selected)
+        }
+        show()
+        save()
+    }
+
+    /// Saves the tab you're on as a .txt file. A to-do list's tasks go one to a line.
+    func saveTextFile() {
+        show()
+        let note = pages[selected].note
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        let name = note.title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        panel.nameFieldStringValue = name + ".txt"
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try note.plainText.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                MainActor.assumeIsolated {
+                    logger.error("Couldn't save a text file: \(error.localizedDescription, privacy: .public)")
+                    Alert.show("Couldn't save “\(url.lastPathComponent)”", error.localizedDescription)
+                }
+            }
+        }
     }
 
     private func makePage(_ note: Note) -> NotePage {

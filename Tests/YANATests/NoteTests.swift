@@ -13,6 +13,31 @@ struct NoteTests {
         #expect(Note(kind: .list).title == "New List")
     }
 
+    @Test func writesAListAsLinesOfText() {
+        let list = Note(kind: .list, items: [ToDo(text: "Milk", done: true), ToDo(text: "Eggs")])
+        #expect(list.plainText == "[x] Milk\n[ ] Eggs\n")
+        #expect(Note(kind: .text, text: "Hi\nthere").plainText == "Hi\nthere")
+    }
+
+    @Test func readsTextFilesInAnyEncoding() {
+        #expect(Note.text(fromFile: Data("caf\u{e9}\r\nok".utf8)) == "caf\u{e9}\nok")
+        #expect(Note.text(fromFile: Data([0xEF, 0xBB, 0xBF]) + Data("Hi".utf8)) == "Hi")
+        #expect(Note.text(fromFile: Data([0xFF, 0xFE, 0x48, 0x00, 0x69, 0x00])) == "Hi")
+        // Not UTF-8, so Windows Latin
+        #expect(Note.text(fromFile: Data([0x63, 0x61, 0x66, 0xE9])) == "caf\u{e9}")
+    }
+
+    @Test func numbersLines() {
+        let text = "one\ntwo\r\nthree\n"
+        #expect(LineNumberRuler.lineNumber(at: 0, in: text) == 1)
+        #expect(LineNumberRuler.lineNumber(at: 3, in: text) == 1)
+        #expect(LineNumberRuler.lineNumber(at: 4, in: text) == 2)
+        #expect(LineNumberRuler.lineNumber(at: 9, in: text) == 3)
+        #expect(LineNumberRuler.lineNumber(at: (text as NSString).length, in: text) == 4)
+        #expect(LineNumberRuler.lineNumber(at: 3, in: "abc") == 1)
+        #expect(LineNumberRuler.lineNumber(at: 0, in: "") == 1)
+    }
+
     @Test func readsWhatsMissingAsEmpty() throws {
         let json = #"[{"kind": "list", "items": [{"text": "Milk"}]}, {"text": "Hi"}, {"kind": "drawing"}]"#
         let notes = try JSONDecoder().decode([Note].self, from: Data(json.utf8))

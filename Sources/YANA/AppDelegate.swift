@@ -61,6 +61,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Keep on Top", #selector(togglePinned), tag: Tag.pinned))
         menu.addItem(item("Sticky Note Mode", #selector(toggleSticky), tag: Tag.sticky))
         menu.addItem(.separator())
+        menu.addItem(item("Open Text File…", #selector(openTextFile)))
+        menu.addItem(item("Save as Text File…", #selector(saveTextFile)))
+        menu.addItem(.separator())
         menu.addItem(item("Open at Login", #selector(toggleOpenAtLogin), tag: Tag.openAtLogin))
         menu.addItem(.separator())
         menu.addItem(item("About YANA", #selector(showAbout)))
@@ -153,6 +156,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func newNote() { note.newNote(.text) }
     @objc func newList() { note.newNote(.list) }
     @objc func showTab(_ sender: NSMenuItem) { note.select(sender.tag) }
+
+    // MARK: Text files, from the File and … menus
+
+    @objc func openTextFile() { note.openTextFile() }
+    @objc func saveTextFile() { note.saveTextFile() }
 }
 
 extension AppDelegate: NSMenuItemValidation {
