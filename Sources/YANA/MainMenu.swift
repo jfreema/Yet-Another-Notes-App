@@ -17,7 +17,8 @@ enum MainMenu {
         file.addItem(item("New To-Do List", #selector(AppDelegate.newList), "n", [.command, .shift], target: target))
         file.addItem(.separator())
         file.addItem(item("Open Text File…", #selector(AppDelegate.openTextFile), "o", target: target))
-        file.addItem(item("Save as Text File…", #selector(AppDelegate.saveTextFile), "s", target: target))
+        file.addItem(item("Save", #selector(AppDelegate.saveTextFile), "s", target: target))
+        file.addItem(item("Save As…", #selector(AppDelegate.saveTextFileAs), "s", [.command, .shift], target: target))
 
         let edit = submenu(main, "Edit")
         edit.addItem(item("Undo", Selector(("undo:")), "z"))

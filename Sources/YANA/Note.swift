@@ -10,14 +10,17 @@ struct Note: Codable, Equatable {
     var kind: Kind
     var text: String
     var items: [ToDo]
+    /// The text file it was opened from or last saved to, which Save writes back to
+    var file: URL?
 
     /// The most tabs the note window holds
     static let limit = 4
 
-    init(kind: Kind, text: String = "", items: [ToDo] = []) {
+    init(kind: Kind, text: String = "", items: [ToDo] = [], file: URL? = nil) {
         self.kind = kind
         self.text = text
         self.items = items
+        self.file = file
     }
 
     /// The tab's name: a note's first line, or a list's first task
@@ -66,7 +69,7 @@ struct Note: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, text, items
+        case kind, text, items, file
     }
 
     // Anything missing or unknown reads as empty, so a file from another version still opens
@@ -75,6 +78,7 @@ struct Note: Codable, Equatable {
         kind = (try? container.decode(Kind.self, forKey: .kind)) ?? .text
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         items = try container.decodeIfPresent([ToDo].self, forKey: .items) ?? []
+        file = try? container.decodeIfPresent(URL.self, forKey: .file)
     }
 }
 

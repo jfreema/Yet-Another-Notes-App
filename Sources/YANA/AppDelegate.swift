@@ -62,7 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Sticky Note Mode", #selector(toggleSticky), tag: Tag.sticky))
         menu.addItem(.separator())
         menu.addItem(item("Open Text File…", #selector(openTextFile)))
-        menu.addItem(item("Save as Text File…", #selector(saveTextFile)))
+        menu.addItem(item("Save as Text File…", #selector(saveTextFile), tag: Tag.save))
+        menu.addItem(item("Save As…", #selector(saveTextFileAs)))
         menu.addItem(.separator())
         menu.addItem(item("Open at Login", #selector(toggleOpenAtLogin), tag: Tag.openAtLogin))
         menu.addItem(.separator())
@@ -77,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let pinned = 1
         static let openAtLogin = 2
         static let sticky = 3
+        static let save = 4
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "", tag: Int = 0) -> NSMenuItem {
@@ -89,6 +91,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.item(withTag: Tag.pinned)?.state = note.isPinned ? .on : .off
         menu.item(withTag: Tag.sticky)?.state = note.isSticky ? .on : .off
+        // Names the file Save writes to, once the tab has one
+        menu.item(withTag: Tag.save)?.title = note.currentFile.map { "Save to “\($0.lastPathComponent)”" }
+            ?? "Save as Text File…"
         menu.item(withTag: Tag.openAtLogin)?.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
@@ -161,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openTextFile() { note.openTextFile() }
     @objc func saveTextFile() { note.saveTextFile() }
+    @objc func saveTextFileAs() { note.saveTextFileAs() }
 }
 
 extension AppDelegate: NSMenuItemValidation {

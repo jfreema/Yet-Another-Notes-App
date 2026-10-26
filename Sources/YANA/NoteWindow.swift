@@ -27,6 +27,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         static let textSize = "textSize"
         static let selected = "selectedNote"
         static let narrowed = "narrowed"
+        static let textFolder = "textFolder"
         static let frame = "NoteWindow"
     }
 
@@ -206,13 +207,23 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
 
     // MARK: Text files
 
+    /// The folder a text file was last opened from or saved to, where the next file panel starts
+    private var textFolder: URL? {
+        get { UserDefaults.standard.url(forKey: Key.textFolder) }
+        set { UserDefaults.standard.set(newValue, forKey: Key.textFolder) }
+    }
+
+    /// The text file the tab you're on was opened from or last saved to
+    var currentFile: URL? { pages[selected].file }
+
     /// Opens a text file into the tab you're on if it's an empty note, else into a new tab. With four tabs already, it
-    /// offers to replace the one you're on.
+    /// offers to replace the one you're on. A file that's already open goes to its tab.
     func openTextFile() {
         show()
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.plainText]
         panel.allowsMultipleSelection = false
+        panel.directoryURL = textFolder
         panel.message = "Choose a text file to open in YANA"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
@@ -221,6 +232,11 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     }
 
     private func open(_ url: URL) {
+        textFolder = url.deletingLastPathComponent()
+        if let index = pages.firstIndex(where: { $0.file?.standardizedFileURL == url.standardizedFileURL }) {
+            select(index)
+            return
+        }
         let text: String
         do {
             text = Note.text(fromFile: try Data(contentsOf: url))
@@ -229,7 +245,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
             Alert.show("Couldn't open “\(url.lastPathComponent)”", error.localizedDescription)
             return
         }
-        let page = makePage(Note(kind: .text, text: text))
+        let page = makePage(Note(kind: .text, text: text, file: url))
         let current = pages[selected].note
         if current.kind == .text && current.isEmpty {
             pages[selected] = page
@@ -248,26 +264,49 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         save()
     }
 
-    /// Saves the tab you're on as a .txt file. A to-do list's tasks go one to a line.
+    /// Saves the tab you're on back to the file it was opened from or last saved to. Without one, asks where.
     func saveTextFile() {
+        let page = pages[selected]
+        guard let file = page.file else { return saveTextFileAs() }
+        if !write(page.note, to: file) { saveTextFileAs() }
+    }
+
+    /// Saves the tab you're on as a new .txt file, starting where its file is, or else where the last one went. A to-do
+    /// list's tasks go one to a line. Save then writes to this file.
+    func saveTextFileAs() {
         show()
-        let note = pages[selected].note
+        let page = pages[selected]
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
-        let name = note.title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-        panel.nameFieldStringValue = name + ".txt"
-        panel.beginSheetModal(for: window) { response in
+        if let file = page.file {
+            panel.directoryURL = file.deletingLastPathComponent()
+            panel.nameFieldStringValue = file.lastPathComponent
+        } else {
+            panel.directoryURL = textFolder
+            let name = page.note.title.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            panel.nameFieldStringValue = name + ".txt"
+        }
+        panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            do {
-                try note.plainText.write(to: url, atomically: true, encoding: .utf8)
-            } catch {
-                MainActor.assumeIsolated {
-                    logger.error("Couldn't save a text file: \(error.localizedDescription, privacy: .public)")
-                    Alert.show("Couldn't save “\(url.lastPathComponent)”", error.localizedDescription)
-                }
+            MainActor.assumeIsolated {
+                guard let self, self.write(page.note, to: url) else { return }
+                page.file = url
+                self.textFolder = url.deletingLastPathComponent()
+                self.save()
             }
+        }
+    }
+
+    private func write(_ note: Note, to url: URL) -> Bool {
+        do {
+            try note.plainText.write(to: url, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            logger.error("Couldn't save a text file: \(error.localizedDescription, privacy: .public)")
+            Alert.show("Couldn't save “\(url.lastPathComponent)”", error.localizedDescription)
+            return false
         }
     }
 
@@ -276,6 +315,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         case .text: TextPage(text: note.text)
         case .list: TodoList(items: note.items)
         }
+        page.file = note.file
         page.apply(look)
         page.onChange = { [unowned self] in self.noteChanged() }
         return page

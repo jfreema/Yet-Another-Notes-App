@@ -6,6 +6,8 @@ protocol NotePage: AnyObject {
     var view: NSView { get }
     /// What's in it now, to save
     var note: Note { get }
+    /// The text file it was opened from or last saved to
+    var file: URL? { get set }
     /// Called after every change
     var onChange: (() -> Void)? { get set }
     /// Puts the cursor where you'd start typing
@@ -46,6 +48,7 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
     private let textView: NSTextView
     private let lineNumbers: LineNumberRuler
     private let defaultCaret: NSColor
+    var file: URL?
     var onChange: (() -> Void)?
 
     init(text: String) {
@@ -72,7 +75,7 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
         textView.delegate = self
     }
 
-    var note: Note { Note(kind: .text, text: textView.string) }
+    var note: Note { Note(kind: .text, text: textView.string, file: file) }
 
     func focus() {
         view.window?.makeFirstResponder(textView)
