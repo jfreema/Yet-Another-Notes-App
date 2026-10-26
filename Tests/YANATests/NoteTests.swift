@@ -38,6 +38,12 @@ struct NoteTests {
         #expect(LineNumberRuler.lineNumber(at: 0, in: "") == 1)
     }
 
+    @Test func remembersItsFile() throws {
+        let note = Note(kind: .text, text: "Hi", file: URL(fileURLWithPath: "/Users/me/top todo.txt"))
+        let data = try JSONEncoder().encode([note, Note(kind: .text, text: "No file")])
+        #expect(try JSONDecoder().decode([Note].self, from: data) == [note, Note(kind: .text, text: "No file")])
+    }
+
     @Test func readsWhatsMissingAsEmpty() throws {
         let json = #"[{"kind": "list", "items": [{"text": "Milk"}]}, {"text": "Hi"}, {"kind": "drawing"}]"#
         let notes = try JSONDecoder().decode([Note].self, from: Data(json.utf8))

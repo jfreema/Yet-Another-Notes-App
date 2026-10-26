@@ -4,6 +4,7 @@ import AppKit
 /// deletes it. Click a task to edit it, or drag it to move it.
 @MainActor
 final class TodoList: NSView, NotePage, NSTextFieldDelegate {
+    var file: URL?
     var onChange: (() -> Void)?
     private let scroll = NSScrollView()
     private let stack = NSStackView()
@@ -94,7 +95,8 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
 
     var note: Note {
         // A task emptied while it's being edited is deleted when the editing ends, so it isn't kept
-        Note(kind: .list, items: rows.map(\.item).filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty })
+        Note(kind: .list, items: rows.map(\.item).filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty },
+             file: file)
     }
 
     func focus() {
