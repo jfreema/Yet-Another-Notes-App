@@ -47,6 +47,9 @@ Everything must build with the Command Line Tools alone, without Xcode.
 - **An accessory app still needs a main menu** for ⌘C, ⌘V, ⌘Z and the rest to work in the note.
 - **A task's text doesn't take a click until it's being edited.** `ToDoRow.hitTest` sends the click to the row, and
   `TodoList.track` turns it into editing on mouse up, or a drag once the mouse moves.
+- **Return in a task opens a new one next to it** (`TodoList.control(_:textView:doCommandBy:)`, splitting at the cursor
+  with `ToDo.split`), and editing it waits a turn for the field editor to finish the Return. A task left empty is
+  deleted when its editing ends, and Return in an empty task goes to adding one at the bottom.
 - **Deleting a task waits a turn** (`perform(_:with:afterDelay:)`), since its × or text is still handling the event.
 - **Converting a note to a list swaps the tab's page** and registers an undo that swaps it back. That's why
   `select(_:keepingUndo:)` exists: selecting a tab otherwise clears the undo stack, which would wipe the redo.
