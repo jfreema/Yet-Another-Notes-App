@@ -8,35 +8,21 @@
 
 <p align="center">Version 1.3.0 · macOS 14 or later · Apple silicon or Intel</p>
 
+<p align="center">
+  <img src="docs/screenshot-note.png" width="340" alt="A note with line numbers and three tabs">
+  &nbsp;&nbsp;
+  <img src="docs/screenshot-sticky-list.png" width="340" alt="A to-do list in sticky note mode">
+</p>
+
+- **One click away.** Click the menu bar icon to show your note and again to put it away. Everything saves as you type.
+- **Notes and to-do lists.** Keep up to four tabs. Check tasks off, drag them into order, or turn a note into a list with ⇧⌘L.
+- **Sticky note mode.** Post-it yellow with hand-lettered text, from the **…** menu.
+- **Stays where you want it.** Pin it above other windows, and slide its transparency to see through it.
+- **Plain text files.** Open and save .txt files with ⌘O and ⌘S. Notes have line numbers.
+- **Updates itself.** **Check for Updates…** installs the latest version in place, and your notes stay put.
+
 ## Install
 
-1. Open the **YANA.zip** you downloaded. It unzips to **YANA.app**.
-2. Drag **YANA.app** into your **Applications** folder, then open it. Its note icon appears in the menu bar.
-3. If macOS says it can't check YANA for malicious software, click **Done**, then **Open Anyway** in **System Settings → Privacy & Security**. Releases signed with YANA's Developer ID open without this step.
-4. Right-click YANA in the menu bar and turn on **Open at Login**.
+Unzip **YANA.zip**, drag **YANA.app** into **Applications** and open it. Then right-click its menu bar icon and turn on **Open at Login**.
 
-## Use it
-
-- **Click the icon** in the menu bar to show your note, and click it again to put it away. Whatever you type is saved as you go.
-- **Click the ×** (or press ⌘W) and the note goes back to the menu bar. Nothing is lost.
-- **Tabs:** click **+** at the top right for a new note or to-do list, up to four. The tabs show once there's more than one, named for what's at the top of each. Right-click a tab to turn it into a to-do list or delete it. ⌘1 to ⌘4 switch tabs, and ⌘N and ⇧⌘N add a note or a list.
-- **Line numbers** run down the left side of a note, with the line you're on in bold. To-do lists don't have them.
-- **Text files:** **Open Text File…** (⌘O) in the **…** menu brings a .txt file into a new tab, or into the tab you're on if it's empty. **Save as Text File…** (⌘S) saves the tab you're on as a .txt file, a to-do list one task to a line. After that the tab remembers its file, whether you opened it or saved it, and ⌘S saves straight back to it (the **…** menu says **Save to “name.txt”**). **Save As…** (⇧⌘S) picks a new file, starting in the same folder with the same name. YANA still keeps its own copy, so nothing is lost if you don't save.
-- **To-do lists:** type a task in the last row and press Return. Check it off and it's crossed out, with an × beside it that deletes it. Check it again to bring it back. Click a task to edit it, or drag it up or down to put it where you want.
-- **Turn a note into a to-do list:** choose **Convert to To-Do List** in the **…** menu (or press ⇧⌘L), and each line of the note becomes a task, skipping blank lines. Bullets like "- " are left off, and lines saved from a list as "[x] Milk" come back checked off. Changed your mind? ⌘Z turns it back into the note as it was.
-- **Sticky note mode:** turn it on in the **…** menu for post-it yellow with black, hand-lettered text.
-- **Keep on top:** click the pin at the top right of the note, and it stays above other windows. Unpinned, it falls behind whatever window you click next.
-- **Transparency:** drag the slider at the top right of the note to see through it.
-- **Text size:** ⌘+ and ⌘- make the text bigger and smaller, and ⌘0 puts it back.
-- **Find:** ⌘F searches a note.
-- **Options:** right-click the menu bar icon, or click **…** on the note, for **Keep on Top**, **Sticky Note Mode**, **Convert to To-Do List**, **Open Text File…**, **Save as Text File…**, **Save As…**, **Open at Login**, **About YANA**, **Check for Updates…** and **Quit YANA**.
-
-Your notes are kept in `~/Library/Application Support/YANA/Notes.json`.
-
-## Updates
-
-Choose **Check for Updates…**. If there's a newer version, YANA downloads it from this repo, checks it, replaces itself in place and restarts. Your notes and settings stay as they are.
-
-## For developers
-
-See [AGENTS.md](AGENTS.md) for building, and [docs/signing.md](docs/signing.md) for signing and notarizing releases.
+Developers: see [AGENTS.md](AGENTS.md) for building and [docs/signing.md](docs/signing.md) for releases.
