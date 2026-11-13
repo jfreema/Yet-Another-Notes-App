@@ -124,6 +124,20 @@ struct ToDo: Codable, Equatable {
         case text, done
     }
 
+    /// Return in this task, with `selection` (a range of its text, counted like a text field counts) selected: the text
+    /// before the selection stays in this task and the text after it becomes a new task below, so at the end of a task
+    /// Return opens an empty one. Nil at the very start of the task, where Return opens an empty task above it instead.
+    func split(at selection: NSRange) -> (kept: ToDo, below: ToDo)? {
+        let text = self.text as NSString
+        let start = min(selection.location, text.length)
+        let end = min(max(NSMaxRange(selection), start), text.length)
+        let before = text.substring(to: start).replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+        let after = text.substring(from: end).replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
+        guard !before.isEmpty else { return nil }
+        // Splitting a checked task leaves both halves checked, but a new empty task isn't done yet
+        return (ToDo(text: before, done: done), ToDo(text: after, done: done && !after.isEmpty))
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""

@@ -19,6 +19,21 @@ struct NoteTests {
         #expect(Note(kind: .text, text: "Hi\nthere").plainText == "Hi\nthere")
     }
 
+    @Test func splitsATaskWhereReturnIsPressed() {
+        let task = ToDo(text: "Buy milk and eggs", done: true)
+        // At the end, an empty task opens below
+        #expect(task.split(at: NSRange(location: 17, length: 0))! == (task, ToDo(text: "")))
+        // In the middle, the text after the cursor moves down, without the spaces around the break
+        #expect(task.split(at: NSRange(location: 9, length: 0))!
+            == (ToDo(text: "Buy milk", done: true), ToDo(text: "and eggs", done: true)))
+        // A selection is replaced by the break
+        #expect(task.split(at: NSRange(location: 3, length: 9))!
+            == (ToDo(text: "Buy", done: true), ToDo(text: "eggs", done: true)))
+        // At the start, the new task opens above instead
+        #expect(task.split(at: NSRange(location: 0, length: 0)) == nil)
+        #expect(ToDo(text: "  Milk").split(at: NSRange(location: 2, length: 0)) == nil)
+    }
+
     @Test func turnsANoteIntoAList() {
         let note = Note(kind: .text, text: "Groceries\n\n  Milk  \n- Eggs\n• Bread\n[x] Butter\n- [ ] Jam\n \t\n",
                         file: URL(fileURLWithPath: "/Users/me/groceries.txt"))

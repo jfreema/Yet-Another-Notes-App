@@ -1,8 +1,8 @@
 import AppKit
 
-/// A to-do list. Type in the last row and press Return to add a task. Checking a task crosses it out and shows a × that
-/// deletes it. Click a task to edit it, or drag it to move it. The tasks are numbered down the left side, like the lines
-/// of a text note.
+/// A to-do list. Type in the last row and press Return to add a task, or press Return in a task to add one below it.
+/// Checking a task crosses it out and shows a × that deletes it. Click a task to edit it, or drag it to move it. The tasks
+/// are numbered down the left side, like the lines of a text note.
 @MainActor
 final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     var file: URL?
@@ -218,10 +218,44 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
             row.refresh()
             onChange?()
         }
-        // Return goes on to adding a task, once this one has finished editing
+        // Return in an empty task goes on to adding one at the bottom, once this one has finished editing. In a task with
+        // text, Return opens a new task next to it instead (see below).
         if (notification.userInfo?["NSTextMovement"] as? Int) == NSTextMovement.return.rawValue {
             perform(#selector(focusLater), with: nil, afterDelay: 0)
         }
+    }
+
+    /// Return in a task opens a new one below it, like starting a new line in a note: at the end of the task it's empty,
+    /// and in the middle it takes the text after the cursor. At the start of the task the new one opens above it.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.insertNewline(_:)), let row = row(for: control),
+              let index = stack.arrangedSubviews.firstIndex(of: row) else { return false }
+        let task = ToDo(text: textView.string, done: row.item.done)
+        // Return in an empty task deletes it and goes on to adding one, when its editing ends
+        guard !task.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let new: ToDoRow
+        if let split = task.split(at: textView.selectedRange()) {
+            textView.string = split.kept.text
+            row.item.text = split.kept.text
+            new = makeRow(split.below)
+            arrange(new, at: index + 1)
+        } else {
+            new = makeRow(ToDo(text: ""))
+            arrange(new, at: index)
+        }
+        renumber()
+        onChange?()
+        // Once the field editor is done with this Return. A new task left empty is deleted when its editing ends.
+        perform(#selector(editLater(_:)), with: new, afterDelay: 0)
+        return true
+    }
+
+    /// Edits a task with the cursor at its start
+    @objc private func editLater(_ row: ToDoRow) {
+        guard row.superview === stack, let window, window.makeFirstResponder(row.field) else { return }
+        row.field.currentEditor()?.selectedRange = NSRange(location: 0, length: 0)
+        layoutSubtreeIfNeeded()
+        row.scrollToVisible(row.bounds)
     }
 
     private func row(for object: Any?) -> ToDoRow? {
