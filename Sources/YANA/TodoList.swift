@@ -1,7 +1,8 @@
 import AppKit
 
 /// A to-do list. Type in the last row and press Return to add a task. Checking a task crosses it out and shows a × that
-/// deletes it. Click a task to edit it, or drag it to move it.
+/// deletes it. Click a task to edit it, or drag it to move it. The tasks are numbered down the left side, like the lines
+/// of a text note.
 @MainActor
 final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     var file: URL?
@@ -12,8 +13,10 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     private let addButton = NSButton()
     private let addField = NSTextField(string: "")
     private var look = Look(textSize: NoteWindowController.defaultTextSize, sticky: false)
+    /// The task being edited, whose number is bolder
+    private weak var editing: ToDoRow?
 
-    /// The space at the list's sides
+    /// The space at the list's right side. The numbers make the space on the left.
     private static let inset: CGFloat = 8
 
     init(items: [ToDo]) {
@@ -32,7 +35,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 0
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: Self.inset, bottom: 6, right: Self.inset)
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: Self.inset)
         stack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
 
@@ -80,6 +83,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         for item in items {
             arrange(makeRow(item), at: rows.count)
         }
+        renumber()
     }
 
     required init?(coder: NSCoder) {
@@ -112,6 +116,25 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
             .font: look.font, .foregroundColor: NSColor.placeholderTextColor,
         ])
         rows.forEach { $0.apply(look) }
+        renumber()
+    }
+
+    // MARK: Numbering
+
+    /// Numbers the tasks from 1, top to bottom. The row for adding one has no number, but lines up with the tasks.
+    private func renumber() {
+        let tasks = rows
+        let width = look.lineNumberWidth(lines: tasks.count)
+        for (index, row) in tasks.enumerated() {
+            row.number(index + 1, width: width, current: row === editing)
+        }
+        addRow.edgeInsets.left = width + ToDoRow.gutterGap
+    }
+
+    /// Called when a task starts being edited
+    func startedEditing(_ row: ToDoRow) {
+        editing = row
+        renumber()
     }
 
     // MARK: Adding and deleting
@@ -124,7 +147,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     /// Puts a row in the list, as wide as the list
     private func arrange(_ row: NSView, at index: Int) {
         stack.insertArrangedSubview(row, at: index)
-        row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -2 * Self.inset).isActive = true
+        row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -Self.inset).isActive = true
     }
 
     private func makeRow(_ item: ToDo) -> ToDoRow {
@@ -143,6 +166,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         let text = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         arrange(makeRow(ToDo(text: text)), at: rows.count)
+        renumber()
         sender.stringValue = ""
         onChange?()
         perform(#selector(focusLater), with: nil, afterDelay: 0)
@@ -163,6 +187,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         guard row.superview === stack else { return }
         stack.removeArrangedSubview(row)
         row.removeFromSuperview()
+        renumber()
         onChange?()
     }
 
@@ -180,6 +205,10 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
 
     func controlTextDidEndEditing(_ notification: Notification) {
         guard let row = row(for: notification.object) else { return }
+        if editing === row {
+            editing = nil
+            renumber()
+        }
         let text = row.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             // Emptying a task deletes it
@@ -238,6 +267,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         guard rows.firstIndex(where: { $0 === row }) != index else { return }
         stack.removeArrangedSubview(row)
         stack.insertArrangedSubview(row, at: index)
+        renumber()
         stack.layoutSubtreeIfNeeded()
     }
 
@@ -250,16 +280,21 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     }
 }
 
-/// One task: a checkbox, its text, and a × once it's checked
+/// One task: its number, a checkbox, its text, and a × once it's checked
 @MainActor
 final class ToDoRow: NSView {
     var item: ToDo
     weak var list: TodoList?
-    let field = NSTextField(string: "")
+    let field = TaskField(string: "")
+    private let numberLabel = NSTextField(labelWithString: "")
+    private lazy var numberWidth = numberLabel.widthAnchor.constraint(equalToConstant: 0)
     private let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let deleteButton = NSButton()
     private let content = NSStackView()
     private var look: Look
+
+    /// The space between the numbers' column and the checkboxes
+    static let gutterGap: CGFloat = 4
 
     /// Highlights it while it's being dragged
     var isLifted = false {
@@ -285,6 +320,10 @@ final class ToDoRow: NSView {
         field.lineBreakMode = .byTruncatingTail
         field.setContentHuggingPriority(.init(1), for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.onFocus = { [unowned self] in self.list?.startedEditing(self) }
+
+        numberLabel.translatesAutoresizingMaskIntoConstraints = false
+        numberLabel.setAccessibilityElement(false)
 
         deleteButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Delete task")
         deleteButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
@@ -304,10 +343,16 @@ final class ToDoRow: NSView {
             content.addArrangedSubview(view)
         }
         addSubview(content)
+        addSubview(numberLabel)
         NSLayoutConstraint.activate([
+            numberLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
+            numberWidth,
+            // On the same line as the task's text, like a text note's line numbers
+            numberLabel.firstBaselineAnchor.constraint(equalTo: field.firstBaselineAnchor),
             content.topAnchor.constraint(equalTo: topAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor,
+                                             constant: Look.lineNumberMargin + Self.gutterGap),
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
         refresh()
@@ -320,6 +365,18 @@ final class ToDoRow: NSView {
     func apply(_ look: Look) {
         self.look = look
         refresh()
+    }
+
+    /// Shows the task's number, in a column `width` wide like a text note's line numbers. The one being edited is bolder.
+    func number(_ number: Int, width: CGFloat, current: Bool) {
+        numberWidth.constant = width - Look.lineNumberMargin
+        let style = NSMutableParagraphStyle()
+        style.alignment = .right
+        numberLabel.attributedStringValue = NSAttributedString(string: String(number), attributes: [
+            .font: current ? look.currentLineNumberFont : look.lineNumberFont,
+            .foregroundColor: current ? look.currentLineNumberColor : look.lineNumberColor,
+            .paragraphStyle: style,
+        ])
     }
 
     /// Shows the task as it is: crossed out with a × when it's done
@@ -362,6 +419,18 @@ final class ToDoRow: NSView {
 
     @objc private func deleteClicked(_ sender: NSButton) {
         list?.remove(self)
+    }
+}
+
+/// A task's text, which tells its row when you start editing it
+@MainActor
+final class TaskField: NSTextField {
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { onFocus?() }
+        return became
     }
 }
 

@@ -18,7 +18,7 @@
 - **Notes and to-do lists.** Keep up to four tabs. Check tasks off, drag them into order, or turn a note into a list with ⇧⌘L.
 - **Sticky note mode.** Post-it yellow with hand-lettered text, from the **…** menu.
 - **Stays where you want it.** Pin it above other windows, and slide its transparency to see through it.
-- **Plain text files.** Open and save .txt files with ⌘O and ⌘S. Notes have line numbers.
+- **Plain text files.** Open and save .txt files with ⌘O and ⌘S. Notes and lists have line numbers.
 - **Updates itself.** **Check for Updates…** installs the latest version in place, and your notes stay put.
 
 ## Install

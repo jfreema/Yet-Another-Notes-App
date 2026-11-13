@@ -33,7 +33,7 @@ Everything must build with the Command Line Tools alone, without Xcode.
 | The tab strip | `TabBar` |
 | A text tab, and how tabs look (`Look`: font and colors, sticky or not) | `Pages` |
 | A text tab's line numbers (an `NSRulerView`) | `LineNumbers` |
-| A to-do list tab, its rows, and dragging them | `TodoList` |
+| A to-do list tab, its rows, their numbers, and dragging them | `TodoList` |
 | What a tab holds | `Note` |
 | Saving the notes to `Notes.json` | `NoteStore` |
 | Check for Updates | `Updater` |
@@ -51,7 +51,8 @@ Everything must build with the Command Line Tools alone, without Xcode.
 - **Converting a note to a list swaps the tab's page** and registers an undo that swaps it back. That's why
   `select(_:keepingUndo:)` exists: selecting a tab otherwise clears the undo stack, which would wipe the redo.
 - **Line numbers are a ruler.** Since macOS 14 views don't clip to their bounds, so the ruler and the scroll view's
-  clip view set `clipsToBounds`, or the text view's background paints over the numbers.
+  clip view set `clipsToBounds`, or the text view's background paints over the numbers. A list has no text view, so
+  each `ToDoRow` has its own number label instead, sized and colored from the same `Look` values as the ruler.
 - **Sticky note mode forces the light appearance** on the window, so dark mode doesn't fight the yellow.
 - **1.0 kept one note in `Note.txt`.** `NoteStore` turns it into the first tab when there's no `Notes.json`, and
   leaves the file where it is.

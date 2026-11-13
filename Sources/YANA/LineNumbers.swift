@@ -50,18 +50,8 @@ final class LineNumberRuler: NSRulerView {
     /// Room for at least two digits, and more as the note grows
     private func updateThickness() {
         let lines = Self.lineNumber(at: (textView?.string as NSString?)?.length ?? 0, in: textView?.string ?? "")
-        let digits = max(2, String(lines).count)
-        let width = ("8" as NSString).size(withAttributes: [.font: numberFont]).width
-        let thickness = (CGFloat(digits) * width + 14).rounded()
+        let thickness = look.lineNumberWidth(lines: lines)
         if ruleThickness != thickness { ruleThickness = thickness }
-    }
-
-    private var numberFont: NSFont {
-        .monospacedDigitSystemFont(ofSize: (look.textSize * 0.85).rounded(), weight: .regular)
-    }
-
-    private var currentFont: NSFont {
-        .monospacedDigitSystemFont(ofSize: (look.textSize * 0.85).rounded(), weight: .semibold)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -93,19 +83,19 @@ final class LineNumberRuler: NSRulerView {
         // The empty line after a final Return, or in an empty note
         let extra = layoutManager.extraLineFragmentRect
         if !extra.isEmpty {
-            let baseline = layoutManager.defaultBaselineOffset(for: textView.font ?? numberFont)
+            let baseline = layoutManager.defaultBaselineOffset(for: textView.font ?? look.lineNumberFont)
             drawNumber(number, current: number == current, baseline: top + extra.minY + baseline)
         }
     }
 
     private func drawNumber(_ number: Int, current: Bool, baseline: CGFloat) {
-        let font = current ? currentFont : numberFont
+        let font = current ? look.currentLineNumberFont : look.lineNumberFont
         let color = current ? look.currentLineNumberColor : look.lineNumberColor
         let label = String(number) as NSString
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let width = label.size(withAttributes: attributes).width
         // Flipped, so a string's top goes at the point
-        label.draw(at: NSPoint(x: ruleThickness - width - 8, y: baseline - font.ascender), withAttributes: attributes)
+        label.draw(at: NSPoint(x: ruleThickness - width - Look.lineNumberMargin, y: baseline - font.ascender), withAttributes: attributes)
     }
 
     /// Which line, counting from 1, the character at `location` is on. Past a final line break is the line after it.

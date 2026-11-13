@@ -34,6 +34,23 @@ struct Look {
     var background: NSColor { sticky ? .stickyYellow : .textBackgroundColor }
     var lineNumberColor: NSColor { sticky ? NSColor(white: 0, alpha: 0.35) : .tertiaryLabelColor }
     var currentLineNumberColor: NSColor { sticky ? .black : .labelColor }
+
+    /// Line numbers are a little smaller than the text, with digits that all take the same width
+    var lineNumberFont: NSFont { .monospacedDigitSystemFont(ofSize: (textSize * 0.85).rounded(), weight: .regular) }
+    /// The number of the line you're on is bolder
+    var currentLineNumberFont: NSFont {
+        .monospacedDigitSystemFont(ofSize: (textSize * 0.85).rounded(), weight: .semibold)
+    }
+
+    /// How wide the line numbers' column is, with room for at least two digits and more as the note grows. Each number
+    /// ends `lineNumberMargin` from its right side.
+    func lineNumberWidth(lines: Int) -> CGFloat {
+        let digits = max(2, String(lines).count)
+        let width = ("8" as NSString).size(withAttributes: [.font: lineNumberFont]).width
+        return (CGFloat(digits) * width + 14).rounded()
+    }
+
+    static let lineNumberMargin: CGFloat = 8
 }
 
 extension NSColor {

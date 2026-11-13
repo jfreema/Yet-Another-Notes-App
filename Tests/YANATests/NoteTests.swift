@@ -52,6 +52,12 @@ struct NoteTests {
         #expect(LineNumberRuler.lineNumber(at: 0, in: "") == 1)
     }
 
+    @Test func widensTheNumbersPastNinetyNine() {
+        let look = Look(textSize: 14, sticky: false)
+        #expect(look.lineNumberWidth(lines: 0) == look.lineNumberWidth(lines: 99))
+        #expect(look.lineNumberWidth(lines: 100) > look.lineNumberWidth(lines: 99))
+    }
+
     @Test func remembersItsFile() throws {
         let note = Note(kind: .text, text: "Hi", file: URL(fileURLWithPath: "/Users/me/top todo.txt"))
         let data = try JSONEncoder().encode([note, Note(kind: .text, text: "No file")])
