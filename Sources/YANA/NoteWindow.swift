@@ -74,6 +74,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
 
         tabBar.onSelect = { [unowned self] in self.select($0) }
         tabBar.onDelete = { [unowned self] in self.deleteNote(at: $0) }
+        tabBar.onConvert = { [unowned self] in self.convertToList(at: $0) }
         pages = store.load().map { makePage($0) }
 
         let opacity = UserDefaults.standard.object(forKey: Key.opacity) as? Double ?? 1
@@ -170,6 +171,10 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     }
 
     func select(_ index: Int) {
+        select(index, keepingUndo: false)
+    }
+
+    private func select(_ index: Int, keepingUndo: Bool) {
         guard pages.indices.contains(index) else { return }
         selected = index
         UserDefaults.standard.set(index, forKey: Key.selected)
@@ -185,7 +190,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
                 view.trailingAnchor.constraint(equalTo: pageArea.trailingAnchor),
             ])
             // Undo stays with the tab it's for
-            window.undoManager?.removeAllActions()
+            if !keepingUndo { window.undoManager?.removeAllActions() }
         }
         updateTabs()
         if window.isVisible { pages[index].focus() }
@@ -202,6 +207,42 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         }
         pages.remove(at: index)
         select(index < selected ? selected - 1 : min(selected, pages.count - 1))
+        save()
+    }
+
+    // MARK: Converting
+
+    /// Whether the tab you're on is a note, which can become a to-do list
+    var canConvertToList: Bool { pages[selected].note.kind == .text }
+
+    /// Turns a note into a to-do list in the same tab, a task to each line that has something on it. Undo turns it
+    /// back into the note as it was.
+    func convertToList(at index: Int? = nil) {
+        let index = index ?? selected
+        guard pages.indices.contains(index), pages[index].note.kind == .text else {
+            NSSound.beep()
+            return
+        }
+        show()
+        let page = pages[index]
+        replace(page, with: makePage(page.note.asList), actionName: "Convert to To-Do List")
+    }
+
+    /// Puts one tab's page in place of another, and lets Undo and Redo swap them back
+    private func replace(_ page: NotePage, with replacement: NotePage, actionName: String) {
+        guard let index = pages.firstIndex(where: { $0 === page }) else { return }
+        pages[index] = replacement
+        // Text size or sticky note mode may have changed since an undone page was last shown
+        replacement.apply(look)
+        select(index, keepingUndo: true)
+        if let undo = window.undoManager {
+            undo.registerUndo(withTarget: self) { controller in
+                MainActor.assumeIsolated {
+                    controller.replace(replacement, with: page, actionName: actionName)
+                }
+            }
+            undo.setActionName(actionName)
+        }
         save()
     }
 

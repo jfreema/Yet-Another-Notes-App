@@ -1,10 +1,12 @@
 import AppKit
 
-/// The note window's tabs, one per note, shown once there's more than one. Right-click a tab to delete it.
+/// The note window's tabs, one per note, shown once there's more than one. Right-click a tab to make a note a to-do list,
+/// or to delete it.
 @MainActor
 final class TabBar: NSView {
     var onSelect: ((Int) -> Void)?
     var onDelete: ((Int) -> Void)?
+    var onConvert: ((Int) -> Void)?
     private let stack = NSStackView()
     private static let listImage = NSImage(systemSymbolName: "checklist", accessibilityDescription: "To-do list")?
         .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular))
@@ -46,9 +48,12 @@ final class TabBar: NSView {
             button.image = note.kind == .list ? Self.listImage : nil
             button.imagePosition = note.kind == .list ? .imageLeading : .noImage
             button.state = index == selected ? .on : .off
-            if let delete = button.menu?.items.first {
-                delete.title = note.kind == .list ? "Delete List" : "Delete Note"
-                delete.tag = index
+            if let items = button.menu?.items, items.count == 2 {
+                // A list is already a list
+                items[0].isHidden = note.kind == .list
+                items[0].tag = index
+                items[1].title = note.kind == .list ? "Delete List" : "Delete Note"
+                items[1].tag = index
             }
         }
     }
@@ -65,15 +70,22 @@ final class TabBar: NSView {
         button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let menu = NSMenu()
+        let convert = NSMenuItem(title: "Convert to To-Do List", action: #selector(convertClicked), keyEquivalent: "")
         let delete = NSMenuItem(title: "Delete Note", action: #selector(deleteClicked), keyEquivalent: "")
-        delete.target = self
-        menu.addItem(delete)
+        for item in [convert, delete] {
+            item.target = self
+            menu.addItem(item)
+        }
         button.menu = menu
         return button
     }
 
     @objc private func clicked(_ sender: NSButton) {
         onSelect?(sender.tag)
+    }
+
+    @objc private func convertClicked(_ sender: NSMenuItem) {
+        onConvert?(sender.tag)
     }
 
     @objc private func deleteClicked(_ sender: NSMenuItem) {

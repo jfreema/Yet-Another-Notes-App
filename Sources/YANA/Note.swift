@@ -50,6 +50,34 @@ struct Note: Codable, Equatable {
         }
     }
 
+    /// The note as a to-do list, a task to each line that has something on it. It isn't tied to the note's file, since
+    /// saving a list there would change what's in it.
+    var asList: Note {
+        kind == .list ? self : Note(kind: .list, items: Self.tasks(fromText: text))
+    }
+
+    /// A task for each line with something on it. A bullet in front ("- ", "* ", "• ") is left off, and a line written
+    /// out from a list ("[x] Milk") comes back checked off.
+    static func tasks(fromText text: String) -> [ToDo] {
+        var tasks: [ToDo] = []
+        text.enumerateLines { line, _ in
+            var line = Substring(line.trimmingCharacters(in: .whitespaces))
+            if let bullet = ["- ", "* ", "+ ", "• "].first(where: { line.hasPrefix($0) }) {
+                line = line.dropFirst(bullet.count)
+            }
+            var done = false
+            if line.hasPrefix("[x] ") || line.hasPrefix("[X] ") {
+                done = true
+                line = line.dropFirst(4)
+            } else if line.hasPrefix("[ ] ") {
+                line = line.dropFirst(4)
+            }
+            let task = line.trimmingCharacters(in: .whitespaces)
+            if !task.isEmpty { tasks.append(ToDo(text: task, done: done)) }
+        }
+        return tasks
+    }
+
     /// A text file's contents: UTF-8 or UTF-16 when it says so, else Windows Latin, which reads anything
     static func text(fromFile data: Data) -> String {
         var text: String
