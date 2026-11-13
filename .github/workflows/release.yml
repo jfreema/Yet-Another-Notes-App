@@ -116,8 +116,8 @@ jobs:
       - name: Publish
         if: steps.version.outputs.publish == 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "jfreema"
+          git config user.email "143004867+jfreema@users.noreply.github.com"
           git add downloads/YANA.zip downloads/latest.json README.md
           git commit -m "Release ${{ steps.version.outputs.version }}"
           git pull --rebase origin main
