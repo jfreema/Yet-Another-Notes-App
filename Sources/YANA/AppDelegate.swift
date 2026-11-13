@@ -61,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Keep on Top", #selector(togglePinned), tag: Tag.pinned))
         menu.addItem(item("Sticky Note Mode", #selector(toggleSticky), tag: Tag.sticky))
         menu.addItem(.separator())
+        menu.addItem(item("Convert to To-Do List", #selector(convertToList)))
+        menu.addItem(.separator())
         menu.addItem(item("Open Text File…", #selector(openTextFile)))
         menu.addItem(item("Save as Text File…", #selector(saveTextFile), tag: Tag.save))
         menu.addItem(item("Save As…", #selector(saveTextFileAs)))
@@ -161,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func newNote() { note.newNote(.text) }
     @objc func newList() { note.newNote(.list) }
     @objc func showTab(_ sender: NSMenuItem) { note.select(sender.tag) }
+    @objc func convertToList() { note.convertToList() }
 
     // MARK: Text files, from the File and … menus
 
@@ -176,6 +179,8 @@ extension AppDelegate: NSMenuItemValidation {
             note.count < Note.limit
         case #selector(showTab(_:)):
             menuItem.tag < note.count
+        case #selector(convertToList):
+            note.canConvertToList
         default:
             true
         }

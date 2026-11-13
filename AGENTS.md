@@ -28,8 +28,8 @@ Everything must build with the Command Line Tools alone, without Xcode.
 |---|---|
 | Launch, one copy at a time | `YANA` |
 | Menu bar icon, its menu, About, Open at Login | `AppDelegate` |
-| Keyboard shortcuts (new tab, open and save .txt, Edit, Find, text size, ⌘1–⌘4, ⌘W) | `MainMenu` |
-| The note window: tabs, pin, transparency slider, sticky note mode, opening and saving .txt files | `NoteWindow` |
+| Keyboard shortcuts (new tab, convert to list, open and save .txt, Edit, Find, text size, ⌘1–⌘4, ⌘W) | `MainMenu` |
+| The note window: tabs, pin, transparency slider, sticky note mode, converting a note to a list, opening and saving .txt files | `NoteWindow` |
 | The tab strip | `TabBar` |
 | A text tab, and how tabs look (`Look`: font and colors, sticky or not) | `Pages` |
 | A text tab's line numbers (an `NSRulerView`) | `LineNumbers` |
@@ -48,6 +48,8 @@ Everything must build with the Command Line Tools alone, without Xcode.
 - **A task's text doesn't take a click until it's being edited.** `ToDoRow.hitTest` sends the click to the row, and
   `TodoList.track` turns it into editing on mouse up, or a drag once the mouse moves.
 - **Deleting a task waits a turn** (`perform(_:with:afterDelay:)`), since its × or text is still handling the event.
+- **Converting a note to a list swaps the tab's page** and registers an undo that swaps it back. That's why
+  `select(_:keepingUndo:)` exists: selecting a tab otherwise clears the undo stack, which would wipe the redo.
 - **Line numbers are a ruler.** Since macOS 14 views don't clip to their bounds, so the ruler and the scroll view's
   clip view set `clipsToBounds`, or the text view's background paints over the numbers.
 - **Sticky note mode forces the light appearance** on the window, so dark mode doesn't fight the yellow.

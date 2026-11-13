@@ -19,6 +19,20 @@ struct NoteTests {
         #expect(Note(kind: .text, text: "Hi\nthere").plainText == "Hi\nthere")
     }
 
+    @Test func turnsANoteIntoAList() {
+        let note = Note(kind: .text, text: "Groceries\n\n  Milk  \n- Eggs\n• Bread\n[x] Butter\n- [ ] Jam\n \t\n",
+                        file: URL(fileURLWithPath: "/Users/me/groceries.txt"))
+        #expect(note.asList == Note(kind: .list, items: [
+            ToDo(text: "Groceries"), ToDo(text: "Milk"), ToDo(text: "Eggs"), ToDo(text: "Bread"),
+            ToDo(text: "Butter", done: true), ToDo(text: "Jam"),
+        ]))
+        #expect(Note(kind: .text, text: " \n").asList == Note(kind: .list))
+        let list = Note(kind: .list, items: [ToDo(text: "Milk", done: true), ToDo(text: "Eggs")])
+        #expect(list.asList == list)
+        // What a list writes to a text file turns back into the same list
+        #expect(Note(kind: .text, text: list.plainText).asList == list)
+    }
+
     @Test func readsTextFilesInAnyEncoding() {
         #expect(Note.text(fromFile: Data("caf\u{e9}\r\nok".utf8)) == "caf\u{e9}\nok")
         #expect(Note.text(fromFile: Data([0xEF, 0xBB, 0xBF]) + Data("Hi".utf8)) == "Hi")
