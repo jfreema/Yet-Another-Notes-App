@@ -228,6 +228,21 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         replace(page, with: makePage(page.note.asList), actionName: "Convert to To-Do List")
     }
 
+    // MARK: Clearing checked tasks
+
+    /// Whether the tab you're on is a to-do list with checked tasks
+    var canClearChecked: Bool { (pages[selected] as? TodoList)?.hasChecked ?? false }
+
+    /// Deletes the checked tasks from the to-do list you're on. Undo puts them back.
+    func clearChecked() {
+        guard let list = pages[selected] as? TodoList, list.hasChecked else {
+            NSSound.beep()
+            return
+        }
+        show()
+        list.clearChecked()
+    }
+
     /// Puts one tab's page in place of another, and lets Undo and Redo swap them back
     private func replace(_ page: NotePage, with replacement: NotePage, actionName: String) {
         guard let index = pages.firstIndex(where: { $0 === page }) else { return }

@@ -1,8 +1,9 @@
 import AppKit
 
 /// A to-do list. Type in the last row and press Return to add a task, or press Return in a task to add one below it.
-/// Checking a task crosses it out and shows a × that deletes it. Click a task to edit it, or drag it to move it. The tasks
-/// are numbered down the left side, like the lines of a text note.
+/// Checking a task crosses it out and shows a × that deletes it, and Clear Checked under the list deletes all the checked
+/// ones. Click a task to edit it, or drag it to move it. The tasks are numbered down the left side, like the lines of a
+/// text note.
 @MainActor
 final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     var file: URL?
@@ -12,6 +13,9 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     private let addRow = NSStackView()
     private let addButton = NSButton()
     private let addField = NSTextField(string: "")
+    /// Under the row for adding a task, while some tasks are checked
+    private let clearRow = NSStackView()
+    private let clearButton = NSButton()
     private var look = Look(textSize: NoteWindowController.defaultTextSize, sticky: false)
     /// The task being edited, whose number is bolder
     private weak var editing: ToDoRow?
@@ -80,6 +84,15 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         addRow.addArrangedSubview(addField)
         arrange(addRow, at: 0)
 
+        clearButton.isBordered = false
+        clearButton.toolTip = "Delete the checked tasks"
+        clearButton.target = self
+        clearButton.action = #selector(clearClicked)
+        clearRow.orientation = .horizontal
+        clearRow.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 1, right: 0)
+        clearRow.addView(clearButton, in: .leading)
+        arrange(clearRow, at: 1)
+
         for item in items {
             arrange(makeRow(item), at: rows.count)
         }
@@ -119,6 +132,9 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         renumber()
     }
 
+    /// Whether any tasks are checked, for Clear Checked
+    var hasChecked: Bool { rows.contains { $0.item.done } }
+
     // MARK: Numbering
 
     /// Numbers the tasks from 1, top to bottom. The row for adding one has no number, but lines up with the tasks.
@@ -129,6 +145,19 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
             row.number(index + 1, width: width, current: row === editing)
         }
         addRow.edgeInsets.left = width + ToDoRow.gutterGap
+        clearRow.edgeInsets.left = width + ToDoRow.gutterGap
+        updateClearButton()
+    }
+
+    /// Shows Clear Checked while some tasks are checked, with how many
+    private func updateClearButton() {
+        let count = rows.filter(\.item.done).count
+        clearRow.isHidden = count == 0
+        let size = (look.font.pointSize * 0.85).rounded()
+        clearButton.attributedTitle = NSAttributedString(string: "Clear Checked (\(count))", attributes: [
+            .font: NSFont(descriptor: look.font.fontDescriptor, size: size) ?? look.font,
+            .foregroundColor: look.doneColor,
+        ])
     }
 
     /// Called when a task starts being edited
@@ -175,7 +204,58 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     }
 
     func changed() {
+        updateClearButton()
         onChange?()
+    }
+
+    // MARK: Clearing checked tasks
+
+    @objc private func clearClicked(_ sender: NSButton) {
+        clearChecked()
+    }
+
+    /// Deletes all the checked tasks. Undo puts them back where they were.
+    func clearChecked() {
+        let checked = rows.filter(\.item.done)
+        guard !checked.isEmpty else { return }
+        // A checked task being edited finishes first, so its field editor isn't left behind
+        if let editing, checked.contains(where: { $0 === editing }) {
+            window?.makeFirstResponder(nil)
+        }
+        take(checked)
+        focus()
+    }
+
+    /// Takes tasks out of the list, and lets Undo put them back
+    private func take(_ taken: [ToDoRow]) {
+        let places = taken.compactMap { row in stack.arrangedSubviews.firstIndex(of: row).map { (row: row, index: $0) } }
+        for row in taken {
+            stack.removeArrangedSubview(row)
+            row.removeFromSuperview()
+        }
+        renumber()
+        onChange?()
+        if let undo = window?.undoManager {
+            undo.registerUndo(withTarget: self) { list in
+                MainActor.assumeIsolated { list.putBack(places) }
+            }
+            undo.setActionName("Clear Checked")
+        }
+    }
+
+    /// Puts taken tasks back where they were, top to bottom, and lets Redo take them again
+    private func putBack(_ places: [(row: ToDoRow, index: Int)]) {
+        for place in places.sorted(by: { $0.index < $1.index }) {
+            arrange(place.row, at: min(place.index, rows.count))
+        }
+        renumber()
+        onChange?()
+        if let undo = window?.undoManager {
+            undo.registerUndo(withTarget: self) { list in
+                MainActor.assumeIsolated { list.take(places.map(\.row)) }
+            }
+            undo.setActionName("Clear Checked")
+        }
     }
 
     /// Deletes a task once the event that asked for it is done, since the task's own button or text is still handling it

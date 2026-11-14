@@ -50,6 +50,8 @@ Everything must build with the Command Line Tools alone, without Xcode.
 - **Return in a task opens a new one next to it** (`TodoList.control(_:textView:doCommandBy:)`, splitting at the cursor
   with `ToDo.split`), and editing it waits a turn for the field editor to finish the Return. A task left empty is
   deleted when its editing ends, and Return in an empty task goes to adding one at the bottom.
+- **Clear Checked** is a row under the add-a-task row, shown only while some tasks are checked (`TodoList.clearChecked`,
+  also in the **…** menu). It registers an undo that puts the tasks back at their old places in the stack.
 - **Deleting a task waits a turn** (`perform(_:with:afterDelay:)`), since its × or text is still handling the event.
 - **Converting a note to a list swaps the tab's page** and registers an undo that swaps it back. That's why
   `select(_:keepingUndo:)` exists: selecting a tab otherwise clears the undo stack, which would wipe the redo.

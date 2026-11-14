@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Sticky Note Mode", #selector(toggleSticky), tag: Tag.sticky))
         menu.addItem(.separator())
         menu.addItem(item("Convert to To-Do List", #selector(convertToList)))
+        menu.addItem(item("Clear Checked Tasks", #selector(clearChecked)))
         menu.addItem(.separator())
         menu.addItem(item("Open Text File…", #selector(openTextFile)))
         menu.addItem(item("Save as Text File…", #selector(saveTextFile), tag: Tag.save))
@@ -164,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func newList() { note.newNote(.list) }
     @objc func showTab(_ sender: NSMenuItem) { note.select(sender.tag) }
     @objc func convertToList() { note.convertToList() }
+    @objc func clearChecked() { note.clearChecked() }
 
     // MARK: Text files, from the File and … menus
 
@@ -181,6 +183,8 @@ extension AppDelegate: NSMenuItemValidation {
             menuItem.tag < note.count
         case #selector(convertToList):
             note.canConvertToList
+        case #selector(clearChecked):
+            note.canClearChecked
         default:
             true
         }
