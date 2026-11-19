@@ -1,7 +1,8 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// The note window: up to four tabs of notes and to-do lists. Closing it hides it to the menu bar.
+/// The note window: up to four tabs of notes and to-do lists, plus any lists synced here from other devices. Closing it
+/// hides it to the menu bar.
 @MainActor
 final class NoteWindowController: NSObject, NSWindowDelegate {
     let window: NSWindow
@@ -16,6 +17,8 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     private let menuButton = NSButton()
     private let opacitySlider = NSSlider()
     private let store = NoteStore()
+    private let listSync = ListSync()
+    private var syncSheet: SyncSheet?
     private var saveTimer: Timer?
     /// The status item's menu, also under the note's … button
     var menuProvider: (() -> NSMenu)?
@@ -75,7 +78,10 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         tabBar.onSelect = { [unowned self] in self.select($0) }
         tabBar.onDelete = { [unowned self] in self.deleteNote(at: $0) }
         tabBar.onConvert = { [unowned self] in self.convertToList(at: $0) }
+        tabBar.onSync = { [unowned self] in self.showSyncSheet(for: $0) }
         pages = store.load().map { makePage($0) }
+        listSync.host = self
+        listSync.start()
 
         let opacity = UserDefaults.standard.object(forKey: Key.opacity) as? Double ?? 1
         opacitySlider.doubleValue = opacity
@@ -196,15 +202,22 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         if window.isVisible { pages[index].focus() }
     }
 
-    /// Asks first, unless there's nothing in it
+    /// Asks first, unless there's nothing in it. A synced list stops syncing here and stays on the other devices.
     func deleteNote(at index: Int) {
         guard pages.count > 1, pages.indices.contains(index) else { return }
-        let note = pages[index].note
-        if !note.isEmpty {
+        let page = pages[index]
+        let note = page.note
+        if note.sync != nil {
+            guard Alert.confirm("Delete “\(note.title)” from this Mac?",
+                                "It stops syncing here, and stays on your other devices.", button: "Delete",
+                                cancel: "Cancel") else { return }
+            listSync.stop(page)
+        } else if !note.isEmpty {
             let what = note.kind == .list ? "to-do list" : "note"
             guard Alert.confirm("Delete “\(note.title)”?", "The \(what) can't be brought back.", button: "Delete",
                                 cancel: "Cancel") else { return }
         }
+        guard let index = pages.firstIndex(where: { $0 === page }) else { return }
         pages.remove(at: index)
         select(index < selected ? selected - 1 : min(selected, pages.count - 1))
         save()
@@ -259,6 +272,69 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
             undo.setActionName(actionName)
         }
         save()
+    }
+
+    // MARK: Syncing
+
+    /// Whether the tab you're on is a to-do list, which can sync
+    var canSync: Bool { pages[selected].note.kind == .list }
+
+    /// Whether the tab you're on is a synced list
+    var isSynced: Bool { pages[selected].sync != nil }
+
+    /// Sync List…: picks the folder a list syncs through and the devices it goes to, or stops it syncing
+    func showSyncSheet(for index: Int? = nil) {
+        let index = index ?? selected
+        guard window.attachedSheet == nil, pages.indices.contains(index), pages[index].note.kind == .list else {
+            NSSound.beep()
+            return
+        }
+        show()
+        select(index)
+        let page = pages[index]
+        // Kept until the next one, since its own button is still finishing when it reports back
+        let sheet = SyncSheet(listTitle: page.note.title, current: page.sync)
+        syncSheet = sheet
+        sheet.begin(for: window) { [weak self] choice in
+            guard let self else { return }
+            switch choice {
+            case .sync(let folder, let devices)?:
+                if page.sync == nil {
+                    self.listSync.start(page, in: folder, to: devices)
+                } else {
+                    self.listSync.send(page, to: devices)
+                }
+            case .stop?:
+                self.listSync.stop(page)
+            case nil:
+                return
+            }
+            self.updateTabs()
+            self.save()
+        }
+    }
+
+    /// Add Sync Folder…: a folder other devices sync lists through, so they can send them here
+    func addSyncFolder() {
+        show()
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add Folder"
+        panel.message = "Choose the folder your other devices sync lists through, such as YANA Sync in iCloud Drive or one shared with you"
+        panel.directoryURL = SyncFolders.hasICloudDrive ? SyncFolders.iCloudDrive : nil
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            MainActor.assumeIsolated {
+                do {
+                    _ = try self?.listSync.add(url)
+                } catch {
+                    Alert.show("Couldn't add “\(url.lastPathComponent)”", error.localizedDescription)
+                }
+            }
+        }
     }
 
     // MARK: Text files
@@ -371,6 +447,8 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         case .text: TextPage(text: note.text)
         case .list: TodoList(items: note.items)
         }
+        page.id = note.id
+        page.sync = note.sync
         page.file = note.file
         page.apply(look)
         page.onChange = { [unowned self] in self.noteChanged() }
@@ -404,7 +482,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     func save() {
         saveTimer?.invalidate()
         saveTimer = nil
-        store.save(pages.map { $0.note })
+        store.save(pages.map { listSync.note(of: $0) })
     }
 
     // MARK: Title bar controls
@@ -533,5 +611,38 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     private func setTextSize(_ size: CGFloat) {
         UserDefaults.standard.set(Double(size), forKey: Key.textSize)
         applyLook()
+    }
+}
+
+extension NoteWindowController: SyncHost {
+    var notePages: [NotePage] { pages }
+
+    func showSynced(_ note: Note, on page: NotePage) {
+        (page as? TodoList)?.show(note.items)
+        page.sync = note.sync
+        noteChanged()
+    }
+
+    func addSynced(_ note: Note) {
+        pages.append(makePage(note))
+        updateTabs()
+        save()
+    }
+
+    func removeSynced(_ page: NotePage) {
+        guard let index = pages.firstIndex(where: { $0 === page }) else { return }
+        if pages.count == 1 {
+            pages[0] = makePage(Note(kind: .text))
+            select(0)
+        } else {
+            pages.remove(at: index)
+            select(index < selected ? selected - 1 : min(selected, pages.count - 1))
+        }
+        // The page shown may have been the one taken away
+        if page.view.superview != nil {
+            page.view.removeFromSuperview()
+            select(min(selected, pages.count - 1))
+        }
+        save()
     }
 }

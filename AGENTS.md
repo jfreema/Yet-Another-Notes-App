@@ -4,7 +4,8 @@ Notes for any coding agent working on YANA.
 
 ## What YANA is
 
-A macOS menu bar app with up to four tabs of plain-text notes and to-do lists. Clicking the menu bar icon shows the
+A macOS menu bar app with up to four tabs of plain-text notes and to-do lists, which can sync to-do lists with YANA on
+other Macs. Clicking the menu bar icon shows the
 note window, and closing it hides it back to the menu bar. The window can be kept on top, a slider sets its
 transparency, and sticky note mode makes it post-it yellow. It's Swift with SwiftPM, with no Xcode
 project and no third-party dependencies, for macOS 14 or later on Apple silicon or Intel. It's an accessory app
@@ -34,7 +35,10 @@ Everything must build with the Command Line Tools alone, without Xcode.
 | A text tab, and how tabs look (`Look`: font and colors, sticky or not) | `Pages` |
 | A text tab's line numbers (an `NSRulerView`) | `LineNumbers` |
 | A to-do list tab, its rows, their numbers, and dragging them | `TodoList` |
-| What a tab holds | `Note` |
+| What a tab holds, and the change times a synced list keeps (`Note.stamped`) | `Note` |
+| Syncing lists: the sync folders and their files, merging copies, this Mac's id | `SyncModel` |
+| Syncing lists: reading the folders every few seconds, merging, and adding or taking away tabs | `ListSync` |
+| Sync This List…: the folder and the devices a list goes to | `SyncSheet` |
 | Saving the notes to `Notes.json` | `NoteStore` |
 | Check for Updates | `Updater` |
 
@@ -63,6 +67,26 @@ Everything must build with the Command Line Tools alone, without Xcode.
   leaves the file where it is.
 - **Activation:** since macOS 14, `NSApp.activate()` is a request macOS can turn down, so alerts and the About panel
   use `NSApp.activateRegardless()`.
+
+## Syncing
+
+- **Each device only writes its own files.** A sync folder holds `devices/<device id>.json` and
+  `lists/<list id>/<device id>.json`. Nothing writes another device's file, so iCloud Drive never makes conflicted
+  copies. Files not named `<uuid>.json` are ignored.
+- **Every note and task has an id** (`Note.id`, `ToDo.id`), given on load to notes from before 1.7. `ToDo.split` keeps
+  the first half's id.
+- **Change times come from comparing**, not from the UI. `ListSync.note(of:)` compares a synced list's page with the
+  copy it last knew (`Note.stamped(since:at:)`): new or edited tasks get the time, missing ones become deletions, and a
+  different order stamps `orderChanged`. So any edit, undo or drag is covered without hooks in `TodoList`.
+- **The merge** (`SyncMerge.merge`) is per task, latest change wins, a deletion wins over an older change, the order
+  comes from the latest copy to change it, and only devices still on the list count. It's pure, so it's what the tests
+  cover.
+- **Other devices' changes wait while you edit or drag a task** (`TodoList.isBusy`), then `TodoList.show(_:)` rebuilds
+  the rows and clears that list's undo.
+- **Starting to sync gives the list a new id**, so files left from an earlier time it synced don't mix in. Stopping
+  writes an empty copy without this Mac in its devices; being taken off by another device deletes this Mac's copy.
+- **Reading and writing is in the `SyncFiles` actor**, off the main thread, since a file in iCloud Drive may have to
+  download first.
 
 ## Releasing
 

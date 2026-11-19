@@ -1,14 +1,18 @@
 import AppKit
 
 /// The note window's tabs, one per note, shown once there's more than one. Right-click a tab to make a note a to-do list,
-/// or to delete it.
+/// sync a list with other devices, or delete it.
 @MainActor
 final class TabBar: NSView {
     var onSelect: ((Int) -> Void)?
     var onDelete: ((Int) -> Void)?
     var onConvert: ((Int) -> Void)?
+    var onSync: ((Int) -> Void)?
     private let stack = NSStackView()
     private static let listImage = NSImage(systemSymbolName: "checklist", accessibilityDescription: "To-do list")?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular))
+    private static let syncedImage = NSImage(systemSymbolName: "arrow.triangle.2.circlepath",
+                                             accessibilityDescription: "Synced to-do list")?
         .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular))
 
     override init(frame: NSRect) {
@@ -44,16 +48,19 @@ final class TabBar: NSView {
         for (index, (button, note)) in zip(buttons, notes).enumerated() {
             button.tag = index
             button.title = note.title
-            button.toolTip = note.title
-            button.image = note.kind == .list ? Self.listImage : nil
+            button.toolTip = note.sync == nil ? note.title : "\(note.title) (synced)"
+            button.image = note.kind == .list ? (note.sync == nil ? Self.listImage : Self.syncedImage) : nil
             button.imagePosition = note.kind == .list ? .imageLeading : .noImage
             button.state = index == selected ? .on : .off
-            if let items = button.menu?.items, items.count == 2 {
-                // A list is already a list
+            if let items = button.menu?.items, items.count == 3 {
+                // A list is already a list, and only lists sync
                 items[0].isHidden = note.kind == .list
                 items[0].tag = index
-                items[1].title = note.kind == .list ? "Delete List" : "Delete Note"
+                items[1].isHidden = note.kind != .list
+                items[1].title = note.sync == nil ? "Sync List…" : "Sync Settings…"
                 items[1].tag = index
+                items[2].title = note.kind == .list ? "Delete List" : "Delete Note"
+                items[2].tag = index
             }
         }
     }
@@ -71,8 +78,9 @@ final class TabBar: NSView {
 
         let menu = NSMenu()
         let convert = NSMenuItem(title: "Convert to To-Do List", action: #selector(convertClicked), keyEquivalent: "")
+        let sync = NSMenuItem(title: "Sync List…", action: #selector(syncClicked), keyEquivalent: "")
         let delete = NSMenuItem(title: "Delete Note", action: #selector(deleteClicked), keyEquivalent: "")
-        for item in [convert, delete] {
+        for item in [convert, sync, delete] {
             item.target = self
             menu.addItem(item)
         }
@@ -86,6 +94,10 @@ final class TabBar: NSView {
 
     @objc private func convertClicked(_ sender: NSMenuItem) {
         onConvert?(sender.tag)
+    }
+
+    @objc private func syncClicked(_ sender: NSMenuItem) {
+        onSync?(sender.tag)
     }
 
     @objc private func deleteClicked(_ sender: NSMenuItem) {
