@@ -100,8 +100,9 @@ struct NoteTests {
 
     @Test func remembersItsFile() throws {
         let note = Note(kind: .text, text: "Hi", file: URL(fileURLWithPath: "/Users/me/top todo.txt"))
-        let data = try JSONEncoder().encode([note, Note(kind: .text, text: "No file")])
-        #expect(try JSONDecoder().decode([Note].self, from: data) == [note, Note(kind: .text, text: "No file")])
+        let notes = [note, Note(kind: .text, text: "No file")]
+        let data = try JSONEncoder().encode(notes)
+        #expect(try JSONDecoder().decode([Note].self, from: data) == notes)
     }
 
     @Test func readsWhatsMissingAsEmpty() throws {
