@@ -1,26 +1,33 @@
 import Foundation
 
 /// One of the note window's tabs: free text, or a to-do list
-struct Note: Codable, Equatable {
-    enum Kind: String, Codable {
+struct Note: Codable, Equatable, Sendable {
+    enum Kind: String, Codable, Sendable {
         case text
         case list
     }
 
+    /// Stays with the tab, so a synced list is the same list on every device
+    var id: UUID
     var kind: Kind
     var text: String
     var items: [ToDo]
     /// The text file it was opened from or last saved to, which Save writes back to
     var file: URL?
+    /// How a to-do list syncs with other devices, once it does
+    var sync: SyncInfo?
 
-    /// The most tabs the note window holds
+    /// The most tabs you can make. Lists synced from other devices can go past it.
     static let limit = 4
 
-    init(kind: Kind, text: String = "", items: [ToDo] = [], file: URL? = nil) {
+    init(id: UUID = UUID(), kind: Kind, text: String = "", items: [ToDo] = [], file: URL? = nil,
+         sync: SyncInfo? = nil) {
+        self.id = id
         self.kind = kind
         self.text = text
         self.items = items
         self.file = file
+        self.sync = sync
     }
 
     /// The tab's name: a note's first line, or a list's first task
@@ -97,31 +104,77 @@ struct Note: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, text, items, file
+        case id, kind, text, items, file, sync
     }
 
-    // Anything missing or unknown reads as empty, so a file from another version still opens
+    // Anything missing or unknown reads as empty, so a file from another version still opens. Notes from before 1.7
+    // get an id here, kept from their next save.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
         kind = (try? container.decode(Kind.self, forKey: .kind)) ?? .text
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         items = try container.decodeIfPresent([ToDo].self, forKey: .items) ?? []
         file = try? container.decodeIfPresent(URL.self, forKey: .file)
+        sync = try? container.decodeIfPresent(SyncInfo.self, forKey: .sync)
+    }
+
+    /// The list with change times for what's different from `before`, an earlier copy of it: a task that's new or edited
+    /// is stamped `now`, one that's gone is marked deleted at `now`, and the order is marked changed if it isn't the same.
+    /// Only a synced list keeps change times.
+    func stamped(since before: Note, at now: Date) -> Note {
+        guard var sync else { return self }
+        var stamped = self
+        var earlier: [UUID: ToDo] = [:]
+        for item in before.items where earlier[item.id] == nil {
+            earlier[item.id] = item
+        }
+        stamped.items = items.map { item in
+            var item = item
+            if let old = earlier[item.id], old.text == item.text, old.done == item.done {
+                item.changed = old.changed ?? item.changed ?? now
+            } else {
+                item.changed = now
+            }
+            // Back again, say by Undo
+            sync.deleted[item.id.uuidString] = nil
+            return item
+        }
+        let ids = Set(items.map(\.id))
+        for old in before.items where !ids.contains(old.id) {
+            sync.deleted[old.id.uuidString] = now
+        }
+        if items.map(\.id) != before.items.map(\.id) {
+            sync.orderChanged = now
+        }
+        stamped.sync = sync
+        return stamped
     }
 }
 
 /// A task in a to-do list
-struct ToDo: Codable, Equatable {
+struct ToDo: Codable, Equatable, Sendable {
+    /// Stays with the task as it's edited and moved, so syncing can tell which task is which
+    var id: UUID
     var text: String
     var done: Bool
+    /// When its text or check last changed, kept once its list syncs. The latest change wins when two devices differ.
+    var changed: Date?
 
-    init(text: String, done: Bool = false) {
+    init(id: UUID = UUID(), text: String, done: Bool = false, changed: Date? = nil) {
+        self.id = id
         self.text = text
         self.done = done
+        self.changed = changed
     }
 
     private enum CodingKeys: String, CodingKey {
-        case text, done
+        case id, text, done, changed
+    }
+
+    /// Whether it shows the same as `other`: the same task, with the same text and check
+    func looksLike(_ other: ToDo) -> Bool {
+        id == other.id && text == other.text && done == other.done
     }
 
     /// Return in this task, with `selection` (a range of its text, counted like a text field counts) selected: the text
@@ -134,13 +187,25 @@ struct ToDo: Codable, Equatable {
         let before = text.substring(to: start).replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
         let after = text.substring(from: end).replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
         guard !before.isEmpty else { return nil }
-        // Splitting a checked task leaves both halves checked, but a new empty task isn't done yet
-        return (ToDo(text: before, done: done), ToDo(text: after, done: done && !after.isEmpty))
+        // Splitting a checked task leaves both halves checked, but a new empty task isn't done yet. The first half is
+        // still this task.
+        var kept = self
+        kept.text = before
+        return (kept, ToDo(text: after, done: done && !after.isEmpty))
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? container.decode(UUID.self, forKey: .id)) ?? UUID()
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         done = try container.decodeIfPresent(Bool.self, forKey: .done) ?? false
+        changed = try? container.decodeIfPresent(Date.self, forKey: .changed)
+    }
+}
+
+extension Array where Element == ToDo {
+    /// Whether the two lists show the same tasks in the same order
+    func looksLike(_ other: [ToDo]) -> Bool {
+        count == other.count && zip(self, other).allSatisfy { $0.looksLike($1) }
     }
 }

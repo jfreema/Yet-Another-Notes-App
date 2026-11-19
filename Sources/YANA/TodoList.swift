@@ -6,6 +6,8 @@ import AppKit
 /// text note.
 @MainActor
 final class TodoList: NSView, NotePage, NSTextFieldDelegate {
+    var id = UUID()
+    var sync: SyncInfo?
     var file: URL?
     var onChange: (() -> Void)?
     private let scroll = NSScrollView()
@@ -19,6 +21,8 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     private var look = Look(textSize: NoteWindowController.defaultTextSize, sticky: false)
     /// The task being edited, whose number is bolder
     private weak var editing: ToDoRow?
+    /// While a click on a task is being followed, which may become a drag
+    private var tracking = false
 
     /// The space at the list's right side. The numbers make the space on the left.
     private static let inset: CGFloat = 8
@@ -112,8 +116,26 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
 
     var note: Note {
         // A task emptied while it's being edited is deleted when the editing ends, so it isn't kept
-        Note(kind: .list, items: rows.map(\.item).filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty },
-             file: file)
+        Note(id: id, kind: .list,
+             items: rows.map(\.item).filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty },
+             file: file, sync: sync)
+    }
+
+    /// Whether a task is being edited or dragged, when changes from other devices wait
+    var isBusy: Bool { editing != nil || tracking }
+
+    /// Shows the tasks as another device changed them. What's being typed in the row for adding a task stays.
+    func show(_ items: [ToDo]) {
+        for row in rows {
+            stack.removeArrangedSubview(row)
+            row.removeFromSuperview()
+        }
+        for item in items {
+            arrange(makeRow(item), at: rows.count)
+        }
+        renumber()
+        // Undo would put back rows that are gone
+        window?.undoManager?.removeAllActions(withTarget: self)
     }
 
     func focus() {
@@ -355,6 +377,8 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         guard let window else { return }
         let start = event.locationInWindow
         var dragging = false
+        tracking = true
+        defer { tracking = false }
         while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]), next.type == .leftMouseDragged {
             if !dragging {
                 guard hypot(next.locationInWindow.x - start.x, next.locationInWindow.y - start.y) > 3 else { continue }
