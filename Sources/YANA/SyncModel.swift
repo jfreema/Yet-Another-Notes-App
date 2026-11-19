@@ -1,4 +1,5 @@
 import Foundation
+import SystemConfiguration
 
 // How a to-do list syncs. A synced list lives in a sync folder that every device it goes to can reach, such as one in
 // iCloud Drive:
@@ -232,6 +233,7 @@ enum ThisDevice {
         return id
     }
 
-    /// The Mac's name from Sharing settings, like "Jared's MacBook Air"
-    static var name: String { Host.current().localizedName ?? "Mac" }
+    /// The Mac's name from Sharing settings, like "Jared's MacBook Air". Read from System Configuration, which answers
+    /// at once, where Host can wait on the network.
+    static var name: String { (SCDynamicStoreCopyComputerName(nil, nil) as String?) ?? "Mac" }
 }
