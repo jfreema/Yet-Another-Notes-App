@@ -5,7 +5,7 @@ import Testing
 /// Syncs this iPhone's lists through a real folder, with a Mac's copies written by hand the way YANA on the Mac
 /// writes them (SyncedList, from the same SyncFormat.swift)
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .timeLimit(.minutes(1)))
 struct PhoneSyncTests {
     let root: URL
     let model: AppModel

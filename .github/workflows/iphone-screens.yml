@@ -41,7 +41,7 @@ jobs:
           ')"
           echo "UDID=$udid" >> "$GITHUB_ENV"
           xcodebuild build -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet
+            -derivedDataPath build -quiet
       - name: Take the screenshots
         timeout-minutes: 10
         run: |

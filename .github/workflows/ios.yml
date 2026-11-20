@@ -50,6 +50,7 @@ jobs:
           xcodegen generate
 
       - name: Test on the iPhone simulator
+        timeout-minutes: 15
         run: |
           # The newest iOS simulator with an iPhone
           udid="$(xcrun simctl list devices available --json | python3 -c '
@@ -66,7 +67,11 @@ jobs:
           print(best[2], "on iOS", ".".join(map(str, best[0])), file=sys.stderr)
           ')"
           xcodebuild test -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
-            CODE_SIGNING_ALLOWED=NO | xcbeautify --renderer github-actions
+            -parallel-testing-enabled NO 2>&1 | tee "$RUNNER_TEMP/test.log" | xcbeautify --renderer github-actions
+
+      - name: Show the end of the test log
+        if: failure()
+        run: tail -n 150 "$RUNNER_TEMP/test.log" || true
 
       - name: Build for iPhone
         run: |

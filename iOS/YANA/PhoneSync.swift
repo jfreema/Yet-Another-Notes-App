@@ -49,9 +49,11 @@ final class PhoneSync {
         Task { await pass() }
     }
 
-    /// Syncs once the pass that's going is done, and waits for it
+    /// Syncs once the pass that's going is done, and waits for it. A pass stuck on a file iCloud Drive is slow to hand
+    /// over isn't waited for more than half a minute.
     func flush() async {
-        while running {
+        let giveUp = Date().addingTimeInterval(30)
+        while running && Date() < giveUp {
             try? await Task.sleep(for: .milliseconds(100))
         }
         await pass()
