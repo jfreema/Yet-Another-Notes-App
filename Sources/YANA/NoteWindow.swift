@@ -353,7 +353,8 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     var currentFile: URL? { pages[selected].file }
 
     /// Opens a text file into the tab you're on if it's an empty note, else into a new tab. With four tabs already, it
-    /// offers to replace the one you're on. A file that's already open goes to its tab.
+    /// offers to replace the one you're on. A file that's already open goes to its tab. A file saved from a to-do list
+    /// opens as a list.
     func openTextFile() {
         show()
         let panel = NSOpenPanel()
@@ -381,7 +382,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
             Alert.show("Couldn't open “\(url.lastPathComponent)”", error.localizedDescription)
             return
         }
-        let page = makePage(Note(kind: .text, text: text, file: url))
+        let page = makePage(Note.opened(fromText: text, file: url))
         let current = pages[selected].note
         if current.kind == .text && current.isEmpty {
             pages[selected] = page

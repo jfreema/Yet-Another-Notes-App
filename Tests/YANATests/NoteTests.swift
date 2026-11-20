@@ -73,6 +73,26 @@ struct NoteTests {
         #expect(Note(kind: .text, text: list.plainText).asList.shown == list.shown)
     }
 
+    @Test func opensAFileSavedFromAListAsAList() {
+        let file = URL(fileURLWithPath: "/Users/me/groceries.txt")
+        let list = Note(kind: .list, items: [ToDo(text: "Milk", done: true), ToDo(text: "Eggs")], file: file)
+        // The list comes back, still tied to its file, and saves the same as before
+        let opened = Note.opened(fromText: list.plainText, file: file)
+        #expect(opened.shown == list.shown)
+        #expect(opened.plainText == list.plainText)
+        // Blank lines and spaces around a line don't matter
+        let spaced = Note.opened(fromText: "\n  [X] Milk\n\n[ ] Eggs  \n")
+        #expect(spaced.shown == Note(kind: .list, items: list.items).shown)
+    }
+
+    @Test func opensAnyOtherFileAsANote() {
+        let file = URL(fileURLWithPath: "/Users/me/notes.txt")
+        // One line that isn't a task is enough
+        for text in ["Groceries\n[x] Milk\n[ ] Eggs\n", "- Milk\n- Eggs\n", "[x]Milk\n", "Hi\nthere", "", " \n"] {
+            #expect(Note.opened(fromText: text, file: file).shown == Note(kind: .text, text: text, file: file).shown)
+        }
+    }
+
     @Test func readsTextFilesInAnyEncoding() {
         #expect(Note.text(fromFile: Data("caf\u{e9}\r\nok".utf8)) == "caf\u{e9}\nok")
         #expect(Note.text(fromFile: Data([0xEF, 0xBB, 0xBF]) + Data("Hi".utf8)) == "Hi")
