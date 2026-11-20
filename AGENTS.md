@@ -5,7 +5,7 @@ Notes for any coding agent working on YANA.
 ## What YANA is
 
 A macOS menu bar app with up to four tabs of plain-text notes and to-do lists, which can sync to-do lists with YANA on
-other Macs. Clicking the menu bar icon shows the
+other Macs and YANA for iPhone (see [YANA for iPhone](#yana-for-iphone)), which also lives in this repo. Clicking the menu bar icon shows the
 note window, and closing it hides it back to the menu bar. The window can be kept on top, a slider sets its
 transparency, and sticky note mode makes it post-it yellow. It's Swift with SwiftPM, with no Xcode
 project and no third-party dependencies, for macOS 14 or later on Apple silicon or Intel. It's an accessory app
@@ -21,7 +21,7 @@ swift test             # unit tests (Swift Testing)
 ./build.sh --release   # universal, signed, zipped to downloads/ (CI does this)
 ```
 
-Everything must build with the Command Line Tools alone, without Xcode.
+The Mac app must build with the Command Line Tools alone, without Xcode. YANA for iPhone needs Xcode.
 
 ## Code
 
@@ -36,7 +36,8 @@ Everything must build with the Command Line Tools alone, without Xcode.
 | A text tab's line numbers (an `NSRulerView`) | `LineNumbers` |
 | A to-do list tab, its rows, their numbers, and dragging them | `TodoList` |
 | What a tab holds, and the change times a synced list keeps (`Note.stamped`) | `Note` |
-| Syncing lists: the sync folders and their files, merging copies, this Mac's id | `SyncModel` |
+| Syncing lists: what's in a sync folder, and merging copies (shared with YANA for iPhone) | `SyncFormat` |
+| Syncing lists: the sync folders this Mac uses, this Mac's id | `SyncModel` |
 | Syncing lists: reading the folders every few seconds, merging, and adding or taking away tabs | `ListSync` |
 | Sync This List…: the folder and the devices a list goes to | `SyncSheet` |
 | Saving the notes to `Notes.json` | `NoteStore` |
@@ -106,6 +107,41 @@ Everything must build with the Command Line Tools alone, without Xcode.
   service may keep dates only to the second.
 - **Sync Settings says when each device was last heard from**: the modification date of its copy of the list, which
   it writes whenever it has a change to pass on. It's the first thing to look at when two Macs don't agree.
+
+## YANA for iPhone
+
+`iOS/` is YANA for iPhone: SwiftUI, iOS 17 or later, iPhone only, bundle id `io.github.jfreema.yana.ios`. It shows and
+edits synced to-do lists (no notes) and syncs them through the same folders. There's no Xcode project in the repo:
+`cd iOS && xcodegen generate` makes `YANA.xcodeproj` from `project.yml`. [docs/iphone.md](docs/iphone.md) is its
+setup and user guide.
+
+| Area | Files |
+|---|---|
+| Launch, and syncing as YANA comes and goes | `YANAApp`, `AppModel.became` |
+| The lists, the folders, this iPhone's id and name, saving to `Lists.json` | `AppModel` |
+| Editing a list: Return in a task, empty tasks, change times | `Note+Phone` |
+| Syncing: the same passes as `ListSync` on the Mac | `PhoneSync` |
+| Reading and writing the folders, iCloud Drive downloads | `PhoneFiles` |
+| A sync folder: its bookmark, and its paths | `Folders` |
+| The screens | `ListsView`, `ListView`, `SyncSettingsView`, `SettingsView`, `Look` |
+
+- **It compiles `Sources/YANA/Note.swift` and `Sources/YANA/SyncFormat.swift`** from the Mac app, so both apps write
+  and merge the same files. Keep those two files to Foundation. A change to them runs the iPhone workflow, which runs
+  the Mac's tests too.
+- **A sync folder is a security-scoped bookmark**, picked with `fileImporter`. YANA has no iCloud entitlement: it
+  uses the folder you picked in Files, so a folder shared from another Apple ID works the same as YANA Sync.
+- **iCloud Drive may not have downloaded a file yet.** iOS lists one of those as `.<name>.icloud`; `PhoneFiles` asks
+  for it and reads it on a later pass, rather than waiting. One that's out of date is asked for and read as it is.
+- **Empty tasks aren't saved or synced**, as on the Mac. `Note.syncable` leaves them out, `Note.stamped(after:at:)`
+  stamps a change made here without counting them, and `[ToDo].showing` keeps them in place when a merge comes in.
+- **Return arrives as a new line in a task's text** (its `TextField` is vertical so long tasks wrap). `Note.enter`
+  turns it into a new task the way Return works on the Mac.
+- **Starting to sync gives the list a new id**, as on the Mac. `AppModel` remembers the old id, so the list's screen
+  keeps showing it.
+- **It syncs only while open**: every 3 seconds, soon after a change, and once more as it goes to the background.
+- **Release**: the iPhone workflow tests on the simulator, archives unsigned, and on main exports with cloud signing
+  and uploads to TestFlight, using the App Store Connect API key in `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY`. The
+  build number is the run number. The version is `CFBundleShortVersionString` in `iOS/Info.plist`.
 
 ## Releasing
 
