@@ -1,0 +1,153 @@
+name: iPhone
+
+# Builds and tests YANA for iPhone (iOS/). On main, it also sends the build to TestFlight, once the App Store Connect
+# API key is in the repo's secrets (docs/iphone.md). It runs again on the 1st of each month, since a TestFlight build
+# stops opening after 90 days. A manual run can send any branch's build to TestFlight.
+
+on:
+  push:
+    paths:
+      - iOS/**
+      - Sources/YANA/Note.swift
+      - Sources/YANA/SyncFormat.swift
+      - .github/workflows/ios.yml
+  workflow_dispatch:
+    inputs:
+      testflight:
+        description: Send the build to TestFlight
+        type: boolean
+        default: true
+  schedule:
+    - cron: "23 14 1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iphone-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  iphone:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Make the Xcode project
+        run: |
+          xcodebuild -version
+          brew install xcodegen
+          command -v xcbeautify >/dev/null || brew install xcbeautify
+          cd iOS
+          xcodegen generate
+
+      - name: Test on the iPhone simulator
+        run: |
+          # The newest iOS simulator with an iPhone
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          best = None
+          for runtime, devices in json.load(sys.stdin)["devices"].items():
+              if ".iOS-" not in runtime:
+                  continue
+              version = tuple(int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-"))
+              for device in devices:
+                  if device["name"].startswith("iPhone") and (best is None or version > best[0]):
+                      best = (version, device["udid"], device["name"])
+          print(best[1])
+          print(best[2], "on iOS", ".".join(map(str, best[0])), file=sys.stderr)
+          ')"
+          xcodebuild test -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
+            CODE_SIGNING_ALLOWED=NO | xcbeautify --renderer github-actions
+
+      - name: Build for iPhone
+        run: |
+          # Unsigned: sending it to TestFlight signs it
+          xcodebuild archive -project iOS/YANA.xcodeproj -scheme YANA -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/YANA.xcarchive" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}.${{ github.run_attempt }}" \
+            CODE_SIGNING_ALLOWED=NO | xcbeautify --renderer github-actions
+          plist="$RUNNER_TEMP/YANA.xcarchive/Products/Applications/YANA.app/Info.plist"
+          echo "Built YANA $(plutil -extract CFBundleShortVersionString raw -o - "$plist") ($(plutil -extract CFBundleVersion raw -o - "$plist"))"
+
+      - name: Send it to TestFlight
+        if: >-
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' && inputs.testflight)
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.ASC_KEY }}
+        run: |
+          if [[ -z "$ASC_KEY_ID" || -z "$ASC_ISSUER_ID" || -z "$ASC_KEY" ]]; then
+            echo "::warning::The App Store Connect API key isn't in the repo's secrets yet (ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY), so this build wasn't sent to TestFlight. See docs/iphone.md."
+            exit 0
+          fi
+          ASC_KEY_ID="$(echo "$ASC_KEY_ID" | tr -d '[:space:]')"
+          ASC_ISSUER_ID="$(echo "$ASC_ISSUER_ID" | tr -d '[:space:]')"
+          key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_KEY" > "$key"
+          if ! grep -q 'BEGIN PRIVATE KEY' "$key"; then
+            echo "::error::ASC_KEY should be the whole .p8 file, from -----BEGIN PRIVATE KEY----- to -----END PRIVATE KEY-----"
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>destination</key>
+            <string>upload</string>
+            <key>teamID</key>
+            <string>885XHF7XLL</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          # Xcode signs it with a distribution certificate Apple keeps for the team (cloud signing), so there's no
+          # certificate to look after here. That needs an API key with the Admin role.
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/YANA.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates -authenticationKeyPath "$key" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          rm -f "$key"
+          echo "::notice::Build ${{ github.run_number }}.${{ github.run_attempt }} went to App Store Connect. It's in TestFlight once Apple has processed it, usually in 5 to 15 minutes."
+
+      - name: Keep Xcode's logs if sending it failed
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          find "${TMPDIR:-/tmp}" -maxdepth 2 -name '*.xcdistributionlogs' -exec cp -R {} "$RUNNER_TEMP/logs/" \; 2>/dev/null || true
+
+      - name: Upload Xcode's logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcode-distribution-logs
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: ignore
+
+  # The Mac app compiles the same Note.swift and SyncFormat.swift, so its tests run too
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test the Mac app
+        run: swift test
