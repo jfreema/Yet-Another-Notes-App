@@ -93,6 +93,8 @@ Everything must build with the Command Line Tools alone, without Xcode.
   seconds (`ListSync.writeSettles`) or the write failed.
 - **Starting to sync gives the list a new id**, so files left from an earlier time it synced don't mix in. Stopping
   writes an empty copy without this Mac in its devices; being taken off by another device deletes this Mac's copy.
+  That empty copy is what keeps a list whose tab was deleted from coming back: finding lists in a folder counts this
+  Mac's own copy too, and `ListSync.left` covers the moment before the copy is written.
 - **Reading and writing is in the `SyncFiles` actor**, off the main thread, since a file in iCloud Drive may have to
   download first. Every copy is read every time: a modification date can't tell whether one changed, since a sync
   service may keep dates only to the second.

@@ -26,6 +26,9 @@ final class ListSync {
     /// Each list's copy as this Mac last wrote it, and when
     private var written: [UUID: (copy: SyncedList, at: Date)] = [:]
 
+    /// The lists this Mac stopped syncing, with when, so one whose tab was deleted doesn't come straight back
+    private var left: [UUID: Date] = [:]
+
     /// How long a copy just written is given to be read back from the folder before it's written again
     private static let writeSettles: TimeInterval = 15
 
@@ -107,6 +110,7 @@ final class ListSync {
         copy.items = []
         copy.devices.removeAll { $0 == ThisDevice.id }
         copy.devicesChanged = Date()
+        left[note.id] = copy.devicesChanged
         let file = folder.copy(of: note.id, by: ThisDevice.id)
         let last = copy
         Task { await files.write(last, to: file) }
@@ -185,8 +189,14 @@ final class ListSync {
             for (id, copies) in found[folder.id] ?? [:] where !here.contains(id) {
                 let others = copies.filter { $0.device != me }
                 guard !others.isEmpty else { continue }
-                let merged = SyncMerge.merge([SyncedList(device: me)] + others, now: now)
+                // This Mac's own copy counts when there is one. After the list's tab was deleted here, it's what says
+                // the list no longer comes here, until the other devices have heard and say so too.
+                let mine = copies.first { $0.device == me } ?? SyncedList(device: me)
+                let merged = SyncMerge.merge([mine] + others, now: now)
                 guard merged.devices.contains(me) else { continue }
+                // Read before this Mac's copy said it had left
+                if let when = left[id], merged.devicesChanged <= when { continue }
+                left[id] = nil
                 let sync = SyncInfo(folder: folder.id, devices: merged.devices, devicesChanged: merged.devicesChanged,
                                     orderChanged: merged.orderChanged, deleted: merged.deleted)
                 let note = Note(id: id, kind: .list, items: merged.items, sync: sync)

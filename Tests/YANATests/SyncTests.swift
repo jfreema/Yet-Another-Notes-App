@@ -154,6 +154,23 @@ struct SyncTests {
         #expect(merged.devices == ["mac", "air"])
     }
 
+    @Test func aDeviceThatLeftTheListStaysOffIt() {
+        let milk = task("Milk", at: 5)
+        // The list's tab was deleted on the work Mac, whose copy is now empty and says the list doesn't go there
+        let work = copy("work", [], devices: ["mac"], devicesAt: 20)
+        let mac = copy("mac", [milk], devices: ["mac", "work"], devicesAt: 10)
+        // On the work Mac, which finds the list in the folder, it doesn't come back
+        #expect(SyncMerge.merge([work, mac], now: at(30)).devices == ["mac"])
+        // And the Mac it came from keeps its tasks
+        let merged = SyncMerge.merge([mac, work], now: at(30))
+        #expect(merged.devices == ["mac"])
+        #expect(merged.items.map(\.text) == ["Milk"])
+        // Until it's sent to the work Mac again
+        let again = SyncMerge.merge([work, copy("mac", [milk], devices: ["mac", "work"], devicesAt: 40)], now: at(50))
+        #expect(again.devices == ["mac", "work"])
+        #expect(again.items.map(\.text) == ["Milk"])
+    }
+
     @Test func forgetsOldDeletions() {
         let gone = UUID()
         let mine = copy("mac", [], deleted: [gone: 0])
