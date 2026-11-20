@@ -85,6 +85,21 @@ struct Note: Codable, Equatable, Sendable {
         return tasks
     }
 
+    /// What a text file opens as: a to-do list when every line with something on it starts "[ ] " or "[x] ", the way a
+    /// list is saved, and otherwise a note. Either way it's tied to the file, and Save writes it back the same way.
+    static func opened(fromText text: String, file: URL? = nil) -> Note {
+        var lines = 0
+        var boxes = 0
+        text.enumerateLines { line, _ in
+            let line = line.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { return }
+            lines += 1
+            if ["[ ] ", "[x] ", "[X] "].contains(where: { line.hasPrefix($0) }) { boxes += 1 }
+        }
+        guard lines > 0, boxes == lines else { return Note(kind: .text, text: text, file: file) }
+        return Note(kind: .list, items: tasks(fromText: text), file: file)
+    }
+
     /// A text file's contents: UTF-8 or UTF-16 when it says so, else Windows Latin, which reads anything
     static func text(fromFile data: Data) -> String {
         var text: String

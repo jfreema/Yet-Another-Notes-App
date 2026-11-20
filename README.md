@@ -6,7 +6,7 @@
 
 <p align="center"><a href="https://github.com/jfreema/Yet-Another-Notes-App/raw/main/downloads/YANA.zip"><b>Download YANA</b></a></p>
 
-<p align="center">Version 1.7.0 · macOS 14 or later · Apple silicon or Intel</p>
+<p align="center">Version 1.7.1 · macOS 14 or later · Apple silicon or Intel</p>
 
 <p align="center">
   <img src="docs/screenshot-note.png" width="340" alt="A note with line numbers and three tabs">
@@ -18,7 +18,7 @@
 - **Notes and to-do lists.** Keep up to four tabs. Check tasks off and clear them away with **Clear Checked**, press Return in one to add a task below it, drag them into order, or turn a note into a list with ⇧⌘L.
 - **Sticky note mode.** Post-it yellow with hand-lettered text, from the **…** menu.
 - **Stays where you want it.** Pin it above other windows, and slide its transparency to see through it.
-- **Plain text files.** Open and save .txt files with ⌘O and ⌘S. Notes and lists have line numbers.
+- **Plain text files.** Open and save .txt files with ⌘O and ⌘S. A to-do list saves with a `[ ]` or `[x]` in front of each task, and a file like that opens as a list again. Notes and lists have line numbers.
 - **Sync lists with your other Macs.** Pick which lists sync and which of your devices each one goes to, through iCloud Drive or any folder your Macs share. See [Syncing lists](#syncing-lists).
 - **Updates itself.** **Check for Updates…** installs the latest version in place, and your notes stay put.
 
@@ -38,6 +38,6 @@ The list appears on the other Macs within seconds, as its own tab, with a sync m
 
 **Sync Settings for This List…** changes which Macs get it, or stops it syncing (each Mac keeps its own copy). Unticking a Mac takes the list off that Mac. Deleting a synced list's tab removes it from this Mac only. Under each Mac it says when YANA last heard from it, which is the last time that Mac had a change to pass on.
 
-Only to-do lists sync, not notes. Any folder that syncs between your Macs works, such as Dropbox or Syncthing. YANA writes small files in it: one per Mac in `devices`, and one per Mac per list in `lists`.
+Only to-do lists sync, not notes. Any folder that syncs between your Macs works, such as Dropbox or Syncthing. Saving a list as a text file in that folder doesn't sync it: that's a separate copy, and **Sync This List…** is what keeps the Macs together. YANA writes small files in it: one per Mac in `devices`, and one per Mac per list in `lists`.
 
 Developers: see [AGENTS.md](AGENTS.md) for building and [docs/signing.md](docs/signing.md) for releases.

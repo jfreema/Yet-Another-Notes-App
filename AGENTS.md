@@ -59,6 +59,9 @@ Everything must build with the Command Line Tools alone, without Xcode.
 - **Deleting a task waits a turn** (`perform(_:with:afterDelay:)`), since its × or text is still handling the event.
 - **Converting a note to a list swaps the tab's page** and registers an undo that swaps it back. That's why
   `select(_:keepingUndo:)` exists: selecting a tab otherwise clears the undo stack, which would wipe the redo.
+- **A text file opens as a list when it reads like one** (`Note.opened(fromText:file:)`): every line with something
+  on it starts `[ ] ` or `[x] `, which is how `plainText` writes a list. Anything else opens as a note, so a file is
+  never rewritten in another shape by Save. Converting a note to a list is looser (`tasks(fromText:)` takes any line).
 - **Line numbers are a ruler.** Since macOS 14 views don't clip to their bounds, so the ruler and the scroll view's
   clip view set `clipsToBounds`, or the text view's background paints over the numbers. A list has no text view, so
   each `ToDoRow` has its own number label instead, sized and colored from the same `Look` values as the ruler.
