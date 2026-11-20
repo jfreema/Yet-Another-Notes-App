@@ -75,11 +75,19 @@ jobs:
 
       - name: Build for iPhone
         run: |
-          # Unsigned: sending it to TestFlight signs it
-          xcodebuild archive -project iOS/YANA.xcodeproj -scheme YANA -configuration Release \
-            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/YANA.xcarchive" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}.${{ github.run_attempt }}" \
-            CODE_SIGNING_ALLOWED=NO | xcbeautify --renderer github-actions
+          # Signed ad hoc, which needs no certificate and keeps the app's entitlements in it. Sending it to TestFlight
+          # signs it for real. Unsigned if ad hoc signing doesn't work out.
+          archive() {
+            xcodebuild archive -project iOS/YANA.xcodeproj -scheme YANA -configuration Release \
+              -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/YANA.xcarchive" \
+              CURRENT_PROJECT_VERSION="${{ github.run_number }}.${{ github.run_attempt }}" "$@" \
+              | xcbeautify --renderer github-actions
+          }
+          if ! archive CODE_SIGN_IDENTITY=- AD_HOC_CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Automatic; then
+            echo "::warning::Ad hoc signing didn't work, so the archive is unsigned"
+            rm -rf "$RUNNER_TEMP/YANA.xcarchive"
+            archive CODE_SIGNING_ALLOWED=NO
+          fi
           plist="$RUNNER_TEMP/YANA.xcarchive/Products/Applications/YANA.app/Info.plist"
           echo "Built YANA $(plutil -extract CFBundleShortVersionString raw -o - "$plist") ($(plutil -extract CFBundleVersion raw -o - "$plist"))"
 

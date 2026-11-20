@@ -150,10 +150,15 @@ struct ListView: View {
         Binding {
             model.list(listID)?.items.first { $0.id == task }?.text ?? ""
         } set: { value in
+            let next: Field?
             switch model.enter(value, in: task, of: listID) {
-            case .stay: break
-            case .task(let next): focus = .task(next)
-            case .add: focus = .add
+            case .stay: next = nil
+            case .task(let id): next = .task(id)
+            case .add: next = .add
+            }
+            // Once the task it goes to is on screen
+            if let next {
+                Task { @MainActor in focus = next }
             }
         }
     }
