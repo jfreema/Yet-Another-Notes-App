@@ -56,7 +56,32 @@ echo "Built $APP (signed $SIGNED_BY)"
 # new team's first submissions can take hours. Then NOTARY_REQUIRED (releases) stops here, and anything else carries on
 # unnotarized.
 NOTARIZED=false
-if [[ -n "$TEAM" && -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_PASSWORD:-}" ]]; then
+# A space or line break pasted along with a secret makes Apple turn down the sign-in, and neither an Apple ID nor an
+# app-specific password has one
+NOTARY_APPLE_ID="${${NOTARY_APPLE_ID:-}//[[:space:]]/}"
+NOTARY_PASSWORD="${${NOTARY_PASSWORD:-}//[[:space:]]/}"
+
+# When Apple turns down the sign-in: what the two secrets look like, never what they are, since the log may be public.
+# The fingerprint is too short to give the password away, but changes when it does.
+notary_secrets() {
+    echo "What the notarization secrets look like:"
+    if [[ "$NOTARY_APPLE_ID" == ?*@?*.?* ]]; then
+        echo "  NOTARY_APPLE_ID looks like an email address"
+    else
+        echo "  NOTARY_APPLE_ID doesn't look like an email address"
+    fi
+    if [[ "$NOTARY_PASSWORD" =~ '^[a-zA-Z]{4}-[a-zA-Z]{4}-[a-zA-Z]{4}-[a-zA-Z]{4}$' ]]; then
+        echo "  NOTARY_PASSWORD has the shape of an app-specific password (xxxx-xxxx-xxxx-xxxx)"
+    else
+        echo "  NOTARY_PASSWORD doesn't have the shape of an app-specific password (xxxx-xxxx-xxxx-xxxx): it has ${#NOTARY_PASSWORD} characters"
+    fi
+    echo "  NOTARY_PASSWORD fingerprint: $(printf '%s' "$NOTARY_PASSWORD" | shasum -a 256 | cut -c1-6)"
+    echo "Make an app-specific password at account.apple.com, signed in with the Apple ID in NOTARY_APPLE_ID, and put it in"
+    echo "the repository secret NOTARY_PASSWORD (Settings › Secrets and variables › Actions › Repository secrets). See"
+    echo "docs/signing.md."
+}
+
+if [[ -n "$TEAM" && -n "$NOTARY_APPLE_ID" && -n "$NOTARY_PASSWORD" ]]; then
     notary() { xcrun notarytool "$@" --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$TEAM" }
     ditto -c -k --keepParent "$APP" build/notarize.zip
     # The result goes to stdout, or to stderr when the wait runs out
@@ -80,6 +105,7 @@ if [[ -n "$TEAM" && -n "${NOTARY_APPLE_ID:-}" && -n "${NOTARY_PASSWORD:-}" ]]; t
         echo "::warning::Apple hasn't finished notarizing submission $SUBMISSION yet, so this build isn't notarized."
     else
         [[ -n "$SUBMISSION" ]] && notary log "$SUBMISSION" || true
+        grep -q "401" build/notary.out && notary_secrets
         echo "Notarization failed${STATUS:+ ($STATUS)}" >&2
         exit 1
     fi
