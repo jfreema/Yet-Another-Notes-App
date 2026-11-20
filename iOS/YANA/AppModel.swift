@@ -347,6 +347,28 @@ final class AppModel {
         sync.run()
     }
 
+    #if DEBUG
+    /// Sample lists, for screenshots (Screenshots.swift)
+    func showSamples() {
+        let now = Date()
+        let folder = PhoneFolder(id: UUID().uuidString, name: "YANA Sync", bookmark: Data())
+        folders = [folder]
+        let sync = SyncInfo(folder: folder.id, devices: [device], devicesChanged: now, orderChanged: now, deleted: [:])
+        lists = [
+            Note(kind: .list, items: [
+                ToDo(text: "Book flights for the conference", done: true),
+                ToDo(text: "Renew passport"),
+                ToDo(text: "Ask Sam about the budget review, and send the slides from last week's meeting"),
+                ToDo(text: "Pick up dry cleaning", done: true),
+                ToDo(text: "Call the dentist"),
+            ], sync: sync),
+            Note(kind: .list, items: [ToDo(text: "Milk"), ToDo(text: "Eggs", done: true), ToDo(text: "Coffee beans")],
+                 sync: sync),
+            Note(kind: .list, items: [ToDo(text: "Gift ideas"), ToDo(text: "Scarf")]),
+        ]
+    }
+    #endif
+
     // MARK: Coming and going
 
     func became(_ phase: ScenePhase) {

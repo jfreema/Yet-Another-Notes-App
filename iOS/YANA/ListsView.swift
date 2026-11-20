@@ -58,6 +58,11 @@ struct ListsView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
+            .onAppear {
+                if let index = Self.openAtLaunch, model.lists.indices.contains(index), path.isEmpty {
+                    path = [model.lists[index].id]
+                }
+            }
             .confirmationDialog(deleting.map { "Delete “\($0.title)”?" } ?? "", isPresented: isDeleting,
                                 titleVisibility: .visible, presenting: deleting) { list in
                 Button(list.sync == nil ? "Delete List" : "Remove from This iPhone", role: .destructive) {
