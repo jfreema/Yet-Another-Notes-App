@@ -89,8 +89,11 @@ Everything must build with the Command Line Tools alone, without Xcode.
   a cursor left in a task stopped that Mac syncing either way.
 - **A sync runs every 3 seconds, right after a save, and when the note is shown or hidden** (`ListSync.run`). The
   timer alone can be slowed by App Nap while the note is hidden.
-- **This Mac's copy is written whenever the folder's doesn't match**, and tried again if it still doesn't after 15
-  seconds (`ListSync.writeSettles`) or the write failed.
+- **This Mac's copy is written whenever the folder's doesn't match**, and again every 15 seconds for as long as it
+  still doesn't (`ListSync.writeSettles`), which covers a write that failed.
+- **`ListSyncTests` sync a real `TodoList` through a folder**, with the other device's copies written by hand
+  (`ListSync.pass()` is one awaited pass, and `ListSync.folders` gives it the test's folder). They put the cursor in
+  a task with `makeFirstResponder`, which works on the runner without showing the window.
 - **Starting to sync gives the list a new id**, so files left from an earlier time it synced don't mix in. Stopping
   writes an empty copy without this Mac in its devices; being taken off by another device deletes this Mac's copy.
   That empty copy is what keeps a list whose tab was deleted from coming back: finding lists in a folder counts this
