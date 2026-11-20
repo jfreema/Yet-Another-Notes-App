@@ -33,6 +33,44 @@ struct NoteTests {
         #expect(Note(kind: .list).title == "New List")
     }
 
+    @Test func namesAListWhatYouCallIt() {
+        let list = Note(kind: .list, items: [ToDo(text: "Milk")], name: "  Groceries ")
+        #expect(list.name == "Groceries")
+        #expect(list.title == "Groceries")
+        #expect(list.contentsTitle == "Milk")
+        // A long name isn't cut short, since you chose it
+        let long = String(repeating: "Things to get ", count: 5)
+        #expect(Note(kind: .list, name: long).title == long.trimmingCharacters(in: .whitespaces))
+        // A name of nothing but spaces is no name
+        #expect(Note(kind: .list, items: [ToDo(text: "Milk")], name: " \n").name == nil)
+        #expect(Note(kind: .list, items: [ToDo(text: "Milk")], name: " ").title == "Milk")
+        #expect(Note(kind: .text, text: "Hi", name: "Ideas").title == "Ideas")
+    }
+
+    @Test func aNameIsSomethingInIt() {
+        #expect(Note(kind: .list).isEmpty)
+        #expect(!Note(kind: .list, name: "Groceries").isEmpty)
+    }
+
+    @Test func keepsItsNameAsANoteTurnsIntoAList() {
+        let note = Note(kind: .text, text: "Milk\nEggs", name: "Groceries")
+        #expect(note.asList.name == "Groceries")
+        #expect(note.asList.items.map(\.text) == ["Milk", "Eggs"])
+    }
+
+    @Test func savesItsName() throws {
+        let notes = [Note(kind: .list, items: [ToDo(text: "Milk")], name: "Groceries"), Note(kind: .text, text: "Hi")]
+        let data = try JSONEncoder().encode(notes)
+        #expect(try JSONDecoder().decode([Note].self, from: data) == notes)
+        // A note without a name saves as it did before names
+        let unnamed = try #require(String(data: JSONEncoder().encode(notes[1]), encoding: .utf8))
+        #expect(!unnamed.contains("name"))
+        let json = #"[{"kind": "list", "name": "  ", "items": [{"text": "Milk"}]}, {"kind": "list", "name": 7}]"#
+        let read = try JSONDecoder().decode([Note].self, from: Data(json.utf8))
+        #expect(read.map(\.name) == [nil, nil])
+        #expect(read[0].title == "Milk")
+    }
+
     @Test func writesAListAsLinesOfText() {
         let list = Note(kind: .list, items: [ToDo(text: "Milk", done: true), ToDo(text: "Eggs")])
         #expect(list.plainText == "[x] Milk\n[ ] Eggs\n")

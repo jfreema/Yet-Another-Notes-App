@@ -79,6 +79,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         tabBar.onDelete = { [unowned self] in self.deleteNote(at: $0) }
         tabBar.onConvert = { [unowned self] in self.convertToList(at: $0) }
         tabBar.onSync = { [unowned self] in self.showSyncSheet(for: $0) }
+        tabBar.onRename = { [unowned self] in self.rename(at: $0) }
         pages = store.load().map { makePage($0) }
         listSync.host = self
         listSync.start()
@@ -225,6 +226,63 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         pages.remove(at: index)
         select(index < selected ? selected - 1 : min(selected, pages.count - 1))
         save()
+    }
+
+    // MARK: Naming
+
+    /// Whether the tab you're on is a to-do list
+    var isList: Bool { pages[selected].note.kind == .list }
+
+    /// Rename…: gives a tab a name of its own in place of its first task or line. A synced list's name goes to the other
+    /// devices. Leaving it empty names it after what's in it again, and Undo puts the old name back.
+    func rename(at index: Int? = nil) {
+        let index = index ?? selected
+        guard window.attachedSheet == nil, pages.indices.contains(index) else {
+            NSSound.beep()
+            return
+        }
+        show()
+        select(index)
+        let page = pages[index]
+        let note = page.note
+        let list = note.kind == .list
+        let alert = NSAlert()
+        alert.messageText = list ? "Name This List" : "Name This Note"
+        alert.informativeText = list ? "Leave it empty to name the list after its first task."
+            : "Leave it empty to name the note after its first line."
+        if note.sync != nil {
+            alert.informativeText += " The name goes to the other devices the list syncs with."
+        }
+        let field = NSTextField(string: note.name ?? "")
+        field.placeholderString = note.contentsTitle
+        field.lineBreakMode = .byTruncatingTail
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 22)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [weak self] response in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if response == .alertFirstButtonReturn {
+                    self.setName(Note.name(field.stringValue), of: page)
+                }
+                if self.pages.indices.contains(self.selected) { self.pages[self.selected].focus() }
+            }
+        }
+    }
+
+    private func setName(_ name: String?, of page: NotePage) {
+        let old = page.name
+        guard name != old, pages.contains(where: { $0 === page }) else { return }
+        page.name = name
+        noteChanged()
+        if let undo = window.undoManager {
+            undo.registerUndo(withTarget: self) { controller in
+                MainActor.assumeIsolated { controller.setName(old, of: page) }
+            }
+            undo.setActionName("Rename")
+        }
     }
 
     // MARK: Converting
@@ -453,6 +511,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         case .list: TodoList(items: note.items)
         }
         page.id = note.id
+        page.name = note.name
         page.sync = note.sync
         page.file = note.file
         page.apply(look)
@@ -460,10 +519,10 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         return page
     }
 
-    /// Shows the tabs once there's more than one note, named for what's in them
+    /// Shows the tabs once there's more than one note, or once the only one has a name, so the name shows
     private func updateTabs() {
         let notes = pages.map { $0.note }
-        let showTabs = notes.count > 1
+        let showTabs = notes.count > 1 || notes.first?.name != nil
         if tabBar.isHidden == showTabs {
             tabBar.isHidden = !showTabs
             (showTabs ? tabsHidden : tabsShown).isActive = false
@@ -628,6 +687,7 @@ extension NoteWindowController: SyncHost {
 
     func showSynced(_ note: Note, on page: NotePage) {
         (page as? TodoList)?.show(note.items)
+        page.name = note.name
         page.sync = note.sync
         updateTabs()
         // Saved as it is, not as a change made here, which would go looking for the other devices' changes again

@@ -7,6 +7,7 @@ import AppKit
 @MainActor
 final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     var id = UUID()
+    var name: String?
     var sync: SyncInfo?
     var file: URL?
     var onChange: (() -> Void)?
@@ -116,7 +117,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
 
     var note: Note {
         // A task emptied while it's being edited is deleted when the editing ends, so it isn't kept
-        Note(id: id, kind: .list, items: rows.map(\.item).filter { !$0.isBlank }, file: file, sync: sync)
+        Note(id: id, kind: .list, items: rows.map(\.item).filter { !$0.isBlank }, name: name, file: file, sync: sync)
     }
 
     /// Whether a task is being clicked or dragged, when changes from other devices wait for the mouse to come up

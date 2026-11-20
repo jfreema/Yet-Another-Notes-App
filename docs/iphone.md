@@ -85,6 +85,9 @@ latest.
 To send a list from the iPhone to your Macs, open it and choose **Sync This List…** from the **…** menu. Swiping a
 synced list away in the lists removes it from the iPhone only, like deleting its tab on a Mac.
 
+A list is named after its first task until you name it: choose **Rename…** from its **…** menu, or touch and hold it
+in your lists. Leave the name empty to go back. The name syncs both ways with your Macs (on YANA 1.8 or later).
+
 ## How it's built
 
 The app is SwiftUI, for iOS 17 or later, in `iOS/`. There's no Xcode project in the repo: `iOS/project.yml` describes

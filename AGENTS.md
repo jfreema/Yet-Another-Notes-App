@@ -66,6 +66,10 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 - **Line numbers are a ruler.** Since macOS 14 views don't clip to their bounds, so the ruler and the scroll view's
   clip view set `clipsToBounds`, or the text view's background paints over the numbers. A list has no text view, so
   each `ToDoRow` has its own number label instead, sized and colored from the same `Look` values as the ruler.
+- **A tab's name is `Note.name`, else what's in it** (`Note.title`, `contentsTitle`). Rename… (tab right-click, a
+  double-click on a tab via `TabButton`, or the **…** menu) sets it with an alert sheet and registers an undo; an empty
+  name takes it off. The tab bar also shows for a single tab once it has a name, since otherwise the name shows
+  nowhere.
 - **Sticky note mode forces the light appearance** on the window, so dark mode doesn't fight the yellow.
 - **1.0 kept one note in `Note.txt`.** `NoteStore` turns it into the first tab when there's no `Notes.json`, and
   leaves the file where it is.
@@ -85,6 +89,12 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 - **The merge** (`SyncMerge.merge`) is per task, latest change wins, a deletion wins over an older change, the order
   comes from the latest copy to change it, and only devices still on the list count. It's pure, so it's what the tests
   cover.
+- **A list's name syncs like the order does**: `SyncedList.name` plus `nameChanged` (kept in `SyncInfo.nameChanged`),
+  stamped by `stamped(since:at:)` when the name differs, and the copy with the latest `nameChanged` wins. Starting to
+  sync a named list stamps it. Both fields are optional and left out of the file when nil, so 1.7 (and the first
+  iPhone builds) read and write copies as before: a copy without `nameChanged` never changes the name.
+- **New fields in a copy have to be optional.** Older versions skip keys they don't know, and `format` isn't checked,
+  so a change that older versions can't skip would need a new folder layout, not just a new field.
 - **Other devices' changes show at once, cursor in a task or not.** `TodoList.show(_:)` keeps the row of every task
   that's still there, so the one being edited keeps its cursor and what's typed, unless another device changed or
   deleted that very task. Empty tasks just opened stay where they are (`[ToDo].showing`), since they aren't synced.

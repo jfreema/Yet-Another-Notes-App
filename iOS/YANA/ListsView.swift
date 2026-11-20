@@ -1,7 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The lists on this iPhone. Lists your Macs send here show up on their own; + starts one here.
+/// The lists on this iPhone. Lists your Macs send here show up on their own; + starts one here. Touch and hold a list
+/// to rename it.
 struct ListsView: View {
     @Environment(AppModel.self) private var model
     @State private var path: [UUID] = []
@@ -9,6 +10,8 @@ struct ListsView: View {
     @State private var addingFolder = false
     @State private var deleting: Note?
     @State private var problem: String?
+    @State private var renaming: Note?
+    @State private var newName = ""
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -17,11 +20,19 @@ struct ListsView: View {
                     NavigationLink(value: list.id) {
                         ListRow(list: list, folder: model.folderName(list.sync?.folder))
                     }
+                    .contextMenu {
+                        Button {
+                            newName = list.name ?? ""
+                            renaming = list
+                        } label: {
+                            Label("Rename…", systemImage: "pencil")
+                        }
+                    }
                 }
                 .onDelete { offsets in
                     guard let index = offsets.first else { return }
                     let list = model.lists[index]
-                    if list.sync == nil && list.syncable.items.isEmpty {
+                    if list.sync == nil && list.syncable.items.isEmpty && list.name == nil {
                         model.delete(list.id)
                     } else {
                         deleting = list
@@ -58,6 +69,7 @@ struct ListsView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView()
             }
+            .renameAlert($renaming, name: $newName, model: model)
             .onAppear {
                 if let index = Self.openAtLaunch, model.lists.indices.contains(index), path.isEmpty {
                     path = [model.lists[index].id]
@@ -112,7 +124,7 @@ struct ListsView: View {
     }
 }
 
-/// A list in the lists: its first task, how much of it is done, and the folder it syncs through
+/// A list in the lists: its name or first task, how much of it is done, and the folder it syncs through
 struct ListRow: View {
     let list: Note
     let folder: String?

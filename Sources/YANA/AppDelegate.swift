@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Keep on Top", #selector(togglePinned), tag: Tag.pinned))
         menu.addItem(item("Sticky Note Mode", #selector(toggleSticky), tag: Tag.sticky))
         menu.addItem(.separator())
+        menu.addItem(item("Rename Note…", #selector(rename), tag: Tag.rename))
         menu.addItem(item("Convert to To-Do List", #selector(convertToList)))
         menu.addItem(item("Clear Checked Tasks", #selector(clearChecked)))
         menu.addItem(.separator())
@@ -86,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let sticky = 3
         static let save = 4
         static let sync = 5
+        static let rename = 6
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "", tag: Int = 0) -> NSMenuItem {
@@ -102,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.item(withTag: Tag.save)?.title = note.currentFile.map { "Save to “\($0.lastPathComponent)”" }
             ?? "Save as Text File…"
         menu.item(withTag: Tag.sync)?.title = note.isSynced ? "Sync Settings for This List…" : "Sync This List…"
+        menu.item(withTag: Tag.rename)?.title = note.isList ? "Rename List…" : "Rename Note…"
         menu.item(withTag: Tag.openAtLogin)?.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
@@ -169,6 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func newNote() { note.newNote(.text) }
     @objc func newList() { note.newNote(.list) }
     @objc func showTab(_ sender: NSMenuItem) { note.select(sender.tag) }
+    @objc func rename() { note.rename() }
     @objc func convertToList() { note.convertToList() }
     @objc func clearChecked() { note.clearChecked() }
 
