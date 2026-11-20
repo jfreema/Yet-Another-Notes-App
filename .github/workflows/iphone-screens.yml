@@ -56,13 +56,16 @@ jobs:
             local name="$1"; shift
             xcrun simctl terminate "$UDID" io.github.jfreema.yana.ios 2>/dev/null || true
             xcrun simctl launch "$UDID" io.github.jfreema.yana.ios -YANAScreenshots YES "$@"
-            sleep 6
+            sleep 10
             xcrun simctl io "$UDID" screenshot "screens/$name.png"
           }
           xcrun simctl ui "$UDID" appearance light
           shot lists
           shot list -YANAOpen 0
           shot sticky -YANAOpen 0 -sticky YES
+          shot sticky-lists -sticky YES
+          shot sync -YANAOpen 1 -YANAShow sync
+          shot settings -YANAShow settings
           xcrun simctl ui "$UDID" appearance dark
           shot list-dark -YANAOpen 1
           shot lists-dark

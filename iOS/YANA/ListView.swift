@@ -68,6 +68,8 @@ struct ListView: View {
                 Button("Clear Checked (\(checked))") { confirmingClear = true }
                     .font(.footnote)
                     .foregroundStyle(look.doneColor)
+                    // Under the tasks' text
+                    .padding(.leading, Look.numberWidth + 24 + 20)
                     .listRowBackground(look.background)
                     .listRowSeparator(.hidden)
             }
@@ -113,6 +115,7 @@ struct ListView: View {
         .onAppear {
             // A new list starts with typing its first task
             if list.items.isEmpty && list.sync == nil { focus = .add }
+            if ListsView.showAtLaunch == "sync" { showingSync = true }
         }
     }
 

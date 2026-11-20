@@ -62,6 +62,7 @@ struct ListsView: View {
                 if let index = Self.openAtLaunch, model.lists.indices.contains(index), path.isEmpty {
                     path = [model.lists[index].id]
                 }
+                if Self.showAtLaunch == "settings" { showingSettings = true }
             }
             .confirmationDialog(deleting.map { "Delete “\($0.title)”?" } ?? "", isPresented: isDeleting,
                                 titleVisibility: .visible, presenting: deleting) { list in
