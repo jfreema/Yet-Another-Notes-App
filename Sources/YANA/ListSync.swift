@@ -18,6 +18,8 @@ protocol SyncHost: AnyObject {
 @MainActor
 final class ListSync {
     weak var host: SyncHost?
+    /// The sync folders this Mac uses. The tests give their own.
+    var folders: () -> [SyncFolder] = { SyncFolders.all }
     private let files = SyncFiles()
     private var timer: Timer?
     private var reading = false
@@ -29,12 +31,12 @@ final class ListSync {
     /// The lists this Mac stopped syncing, with when, so one whose tab was deleted doesn't come straight back
     private var left: [UUID: Date] = [:]
 
-    /// How long a copy just written is given to be read back from the folder before it's written again
-    private static let writeSettles: TimeInterval = 15
+    /// How long a copy just written is given to show up in the folder as written, before it's written again
+    var writeSettles: TimeInterval = 15
 
     func start() {
         let me = DeviceCard(id: ThisDevice.id, name: ThisDevice.name, seen: Date())
-        let folders = SyncFolders.all
+        let folders = self.folders()
         Task { await files.register(me, in: folders) }
         let timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.run() }
@@ -105,7 +107,7 @@ final class ListSync {
         page.sync = nil
         known[note.id] = nil
         written[note.id] = nil
-        guard let folder = note.sync.flatMap({ SyncFolders.folder($0.folder) }),
+        guard let folder = folders().first(where: { $0.id == note.sync?.folder }),
               var copy = SyncedList(note, device: ThisDevice.id) else { return }
         copy.items = []
         copy.devices.removeAll { $0 == ThisDevice.id }
@@ -118,22 +120,31 @@ final class ListSync {
 
     // MARK: Syncing
 
-    /// Reads every sync folder, then merges what's in them
+    /// Syncs now, unless it already is
     func run() {
-        let folders = SyncFolders.all
+        guard !reading, !folders().isEmpty else { return }
+        Task { await pass() }
+    }
+
+    /// One pass of syncing: reads every sync folder, merges what's in them, and writes this Mac's copies
+    func pass() async {
+        let folders = self.folders()
         guard !reading, !folders.isEmpty else { return }
         reading = true
-        Task {
-            let found = await files.read(folders)
-            reading = false
-            merge(found, folders: folders)
+        let found = await files.read(folders)
+        reading = false
+        for write in merge(found, folders: folders) {
+            await files.write(write.copy, to: write.file)
         }
     }
 
-    private func merge(_ found: [String: [UUID: [SyncedList]]], folders: [SyncFolder]) {
-        guard let host else { return }
+    /// Merges what was read from the folders into the tabs, and gives back this Mac's copies to write
+    private func merge(_ found: [String: [UUID: [SyncedList]]],
+                       folders: [SyncFolder]) -> [(copy: SyncedList, file: URL)] {
+        guard let host else { return [] }
         let me = ThisDevice.id
         let now = Date()
+        var writes: [(copy: SyncedList, file: URL)] = []
 
         for page in host.notePages {
             let local = note(of: page)
@@ -169,18 +180,13 @@ final class ListSync {
             }
 
             // This Mac's copy is written whenever the folder doesn't have it as it is now. One just written may not have
-            // been read back yet, so it's given a while first.
+            // been read back yet, or couldn't be written, so it's given a while before it's written again.
             let onDisk = copies.first { $0.device == me }
             guard onDisk != merged else { continue }
             if let last = written[local.id], last.copy == merged,
-               now.timeIntervalSince(last.at) < Self.writeSettles { continue }
+               now.timeIntervalSince(last.at) < writeSettles { continue }
             written[local.id] = (merged, now)
-            let id = local.id
-            Task {
-                let wrote = await files.write(merged, to: file)
-                // Tried again the next time
-                if !wrote { written[id] = nil }
-            }
+            writes.append((merged, file))
         }
 
         // Lists sent here from another device
@@ -205,6 +211,7 @@ final class ListSync {
                 host.addSynced(note)
             }
         }
+        return writes
     }
 }
 
@@ -231,7 +238,9 @@ actor SyncFiles {
                 if unreadable.insert(folder.id).inserted {
                     logger.error("Couldn't read a sync folder: \(error.localizedDescription, privacy: .public)")
                 }
-                continue
+                // A folder that's there but has lost its lists folder has no lists yet, and writing one makes it again
+                guard manager.fileExists(atPath: folder.url.path) else { continue }
+                lists = []
             }
             var copies: [UUID: [SyncedList]] = [:]
             for list in lists {
