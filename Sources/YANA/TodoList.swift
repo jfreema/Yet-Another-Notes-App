@@ -116,26 +116,64 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
 
     var note: Note {
         // A task emptied while it's being edited is deleted when the editing ends, so it isn't kept
-        Note(id: id, kind: .list,
-             items: rows.map(\.item).filter { !$0.text.trimmingCharacters(in: .whitespaces).isEmpty },
-             file: file, sync: sync)
+        Note(id: id, kind: .list, items: rows.map(\.item).filter { !$0.isBlank }, file: file, sync: sync)
     }
 
-    /// Whether a task is being edited or dragged, when changes from other devices wait
-    var isBusy: Bool { editing != nil || tracking }
+    /// Whether a task is being clicked or dragged, when changes from other devices wait for the mouse to come up
+    var isDragging: Bool { tracking }
 
-    /// Shows the tasks as another device changed them. What's being typed in the row for adding a task stays.
+    /// Shows the tasks as merged with other devices' changes. A task that's still there keeps its row, so the one being
+    /// edited keeps its cursor and what's typed, unless another device changed or deleted that very task. An empty task
+    /// just opened here stays where it is, and so does what's being typed in the row for adding a task.
     func show(_ items: [ToDo]) {
-        for row in rows {
+        let before = rows
+        let shown = before.map(\.item).showing(items)
+
+        var stoppedEditing = false
+        if let row = editing, shown.first(where: { $0.id == row.item.id })?.looksLike(row.item) != true {
+            stopEditing(row)
+            stoppedEditing = true
+        }
+
+        var have: [UUID: ToDoRow] = [:]
+        for row in before where have[row.item.id] == nil {
+            have[row.item.id] = row
+        }
+        let after: [ToDoRow] = shown.map { item in
+            guard let row = have[item.id] else { return makeRow(item) }
+            let same = row.item.looksLike(item)
+            row.item = item
+            // Not the one being edited, which looks the same: showing it again would end its editing
+            if !same { row.refresh() }
+            return row
+        }
+        for row in before where !after.contains(where: { $0 === row }) {
             stack.removeArrangedSubview(row)
             row.removeFromSuperview()
         }
-        for item in items {
-            arrange(makeRow(item), at: rows.count)
+        for (index, row) in after.enumerated() {
+            let placed = rows
+            if index < placed.count, placed[index] === row { continue }
+            if row.superview === stack {
+                // Stays in the list as it moves, like a task being dragged, so one being edited keeps its cursor
+                stack.removeArrangedSubview(row)
+                stack.insertArrangedSubview(row, at: index)
+            } else {
+                arrange(row, at: index)
+            }
         }
         renumber()
         // Undo would put back rows that are gone
         window?.undoManager?.removeAllActions(withTarget: self)
+        if stoppedEditing { focus() }
+    }
+
+    /// Ends a task's editing, for one another device changed or deleted
+    private func stopEditing(_ row: ToDoRow) {
+        if row.field.currentEditor() != nil { window?.makeFirstResponder(nil) }
+        // Ending the editing of an empty task asks for it to be deleted, but what happens to it is the other device's say
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(removeNow(_:)), object: row)
+        editing = nil
     }
 
     func focus() {

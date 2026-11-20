@@ -12,9 +12,9 @@ protocol SyncHost: AnyObject {
     func removeSynced(_ page: NotePage)
 }
 
-/// Syncs to-do lists through sync folders. Every few seconds it reads the other devices' copies of each synced list,
-/// merges them with this Mac's copy, shows the result, and writes this Mac's copy when it has changed. Lists another
-/// device sends here get a tab of their own.
+/// Syncs to-do lists through sync folders. Every few seconds, and right after a change here, it reads the other
+/// devices' copies of each synced list, merges them with this Mac's copy, shows the result, and writes this Mac's copy
+/// when it has changed. Lists another device sends here get a tab of their own.
 @MainActor
 final class ListSync {
     weak var host: SyncHost?
@@ -23,16 +23,21 @@ final class ListSync {
     private var reading = false
     /// Each synced list as last saved, shown or merged, to tell what's changed since by comparing
     private var known: [UUID: Note] = [:]
-    /// Each list's copy as this Mac last wrote it
-    private var written: [UUID: SyncedList] = [:]
+    /// Each list's copy as this Mac last wrote it, and when
+    private var written: [UUID: (copy: SyncedList, at: Date)] = [:]
+
+    /// How long a copy just written is given to be read back from the folder before it's written again
+    private static let writeSettles: TimeInterval = 15
 
     func start() {
         let me = DeviceCard(id: ThisDevice.id, name: ThisDevice.name, seen: Date())
         let folders = SyncFolders.all
         Task { await files.register(me, in: folders) }
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.run() }
         }
+        timer.tolerance = 0.5
+        self.timer = timer
     }
 
     /// A tab's note, and for a synced list, stamped with when each change was made since it was last known
@@ -148,19 +153,29 @@ final class ListSync {
 
             let result = local.adopting(merged)
             if !result.items.looksLike(local.items) {
-                // A task being edited or dragged waits for the next time
-                if (page as? TodoList)?.isBusy == true { continue }
+                // Only a task under the mouse makes the others' changes wait, and only until the mouse comes up. A
+                // task with the cursor in it doesn't: the cursor can sit there for hours, and then nothing would sync.
+                if (page as? TodoList)?.isDragging == true { continue }
                 known[local.id] = result
+                logger.info("Showing other devices' changes to a synced list")
                 host.showSynced(result, on: page)
             } else {
                 known[local.id] = result
                 page.sync = result.sync
             }
 
+            // This Mac's copy is written whenever the folder doesn't have it as it is now. One just written may not have
+            // been read back yet, so it's given a while first.
             let onDisk = copies.first { $0.device == me }
-            if onDisk != merged && (onDisk == nil || written[local.id] != merged) {
-                written[local.id] = merged
-                Task { await files.write(merged, to: file) }
+            guard onDisk != merged else { continue }
+            if let last = written[local.id], last.copy == merged,
+               now.timeIntervalSince(last.at) < Self.writeSettles { continue }
+            written[local.id] = (merged, now)
+            let id = local.id
+            Task {
+                let wrote = await files.write(merged, to: file)
+                // Tried again the next time
+                if !wrote { written[id] = nil }
             }
         }
 
@@ -176,6 +191,7 @@ final class ListSync {
                                     orderChanged: merged.orderChanged, deleted: merged.deleted)
                 let note = Note(id: id, kind: .list, items: merged.items, sync: sync)
                 known[id] = note
+                logger.notice("Adding a list another device syncs here")
                 host.addSynced(note)
             }
         }
@@ -184,16 +200,29 @@ final class ListSync {
 
 /// Reads and writes the sync folders, away from the main thread, since a file in iCloud Drive may have to download
 actor SyncFiles {
-    /// Copies already read, by path, with their modification dates, so unchanged files aren't read again
-    private var cache: [String: (date: Date, list: SyncedList)] = [:]
+    /// Copies already read, by path, with what was in the file, so one that hasn't changed isn't worked out again. The
+    /// file is read each time: its modification date can't tell whether it changed, since a sync service may keep dates
+    /// only to the second, and two changes in the same second would look like one.
+    private var cache: [String: (data: Data, list: SyncedList)] = [:]
+    /// The folders that couldn't be read last time, so each is logged once, not every few seconds
+    private var unreadable: Set<String> = []
 
     /// Every list in every folder: folder id → list id → the devices' copies. A folder that can't be read is left out.
     func read(_ folders: [SyncFolder]) -> [String: [UUID: [SyncedList]]] {
         let manager = FileManager.default
         var found: [String: [UUID: [SyncedList]]] = [:]
         for folder in folders {
-            guard let lists = try? manager.contentsOfDirectory(at: folder.listsFolder, includingPropertiesForKeys: nil,
-                                                               options: [.skipsHiddenFiles]) else { continue }
+            let lists: [URL]
+            do {
+                lists = try manager.contentsOfDirectory(at: folder.listsFolder, includingPropertiesForKeys: nil,
+                                                        options: [.skipsHiddenFiles])
+                unreadable.remove(folder.id)
+            } catch {
+                if unreadable.insert(folder.id).inserted {
+                    logger.error("Couldn't read a sync folder: \(error.localizedDescription, privacy: .public)")
+                }
+                continue
+            }
             var copies: [UUID: [SyncedList]] = [:]
             for list in lists {
                 guard let id = UUID(uuidString: list.lastPathComponent),
@@ -210,21 +239,23 @@ actor SyncFiles {
     }
 
     private func read(_ file: URL) -> SyncedList? {
-        let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            ?? .distantPast
-        if let cached = cache[file.path], cached.date == date { return cached.list }
-        guard let data = try? Data(contentsOf: file),
-              let list = try? JSONDecoder().decode(SyncedList.self, from: data) else { return nil }
-        cache[file.path] = (date, list)
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        if let cached = cache[file.path], cached.data == data { return cached.list }
+        guard let list = try? JSONDecoder().decode(SyncedList.self, from: data) else { return nil }
+        cache[file.path] = (data, list)
         return list
     }
 
-    func write(_ list: SyncedList, to file: URL) {
+    /// Whether it was written
+    @discardableResult
+    func write(_ list: SyncedList, to file: URL) -> Bool {
         do {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try list.encoded().write(to: file, options: .atomic)
+            return true
         } catch {
             logger.error("Couldn't write a synced list: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 

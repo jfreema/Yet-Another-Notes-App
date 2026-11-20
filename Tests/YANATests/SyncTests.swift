@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 @testable import YANA
 
@@ -182,6 +182,57 @@ struct SyncTests {
         #expect(SyncedList(Note(kind: .list), device: "mac") == nil)
     }
 
+    // MARK: Showing
+
+    @Test func keepsAnEmptyTaskWhereItIsWhenChangesComeIn() {
+        let a = task("A"), b = task("B"), c = task("C")
+        // An empty task was just opened under A, when another device deleted B and added a task
+        let empty = ToDo(text: "")
+        let shown = [a, empty, b, c].showing([a, c, task("New", at: 5)])
+        #expect(shown.map(\.text) == ["A", "", "C", "New"])
+        #expect(shown[1].id == empty.id)
+    }
+
+    @Test func keepsAnEmptyTaskAfterTheTaskItFollows() {
+        let a = task("A"), b = task("B"), c = task("C")
+        let empty = ToDo(text: " ")
+        #expect([empty, a].showing([a]).map(\.text) == [" ", "A"])
+        // The task it followed is gone, so it follows the one before that, wherever that went
+        #expect([a, b, empty, c].showing([c, a]).map(\.text) == ["C", "A", " "])
+        // Two in a row stay in a row
+        let other = ToDo(text: "")
+        #expect([a, empty, other, b].showing([b, a]).map(\.id) == [b.id, a.id, empty.id, other.id])
+    }
+
+    @Test func showsAnotherDevicesChangeToATaskEmptiedHere() {
+        var milk = task("Milk")
+        let theirs = ToDo(id: milk.id, text: "Oat milk", changed: at(9))
+        milk.text = ""
+        #expect([milk].showing([theirs]) == [theirs])
+        // Each task shows once
+        #expect([ToDo]().showing([theirs, theirs]) == [theirs])
+    }
+
+    @MainActor @Test func showsOtherDevicesChangesInTheList() {
+        let a = task("A"), b = task("B"), c = task("C")
+        let list = TodoList(items: [a, b, c])
+        // Another device edited B, moved it first, deleted C and added a task
+        var edited = b
+        edited.text = "B again"
+        edited.done = true
+        edited.changed = at(5)
+        let new = task("New", at: 6)
+        list.show([edited, a, new])
+        #expect(list.note.items == [edited, a, new])
+        #expect(list.hasChecked)
+        // The same again changes nothing
+        list.show([edited, a, new])
+        #expect(list.note.items == [edited, a, new])
+        list.show([])
+        #expect(list.note.items.isEmpty)
+        #expect(!list.isDragging)
+    }
+
     // MARK: Files
 
     @Test func readsBackWhatItWrites() throws {
@@ -207,8 +258,39 @@ struct SyncTests {
         let copies = try #require(found["here"]?[id])
         #expect(Set(copies.map(\.device)) == [mac, air])
         #expect(found["gone"] == nil)
+        #expect(folder.canBeRead)
+        #expect(!SyncFolder(id: "gone", url: root.appendingPathComponent("nope")).canBeRead)
 
         await files.register(DeviceCard(id: mac, name: "Daedalus-22", seen: at(0)), in: [folder])
         #expect(folder.devices().map(\.name) == ["Daedalus-22"])
+    }
+
+    @Test func readsACopyThatChangedThoughItsDateDidnt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = SyncFolder(id: "here", url: root)
+        let files = SyncFiles()
+        let id = UUID()
+        let air = UUID().uuidString
+        let file = folder.copy(of: id, by: air)
+        // A sync service may keep dates only to the second, so two changes in a second have the same one
+        let date = [FileAttributeKey.modificationDate: Date(timeIntervalSince1970: 1_800_000_000)]
+
+        let wroteFirst = await files.write(copy(air, [task("Milk")]), to: file)
+        #expect(wroteFirst)
+        try FileManager.default.setAttributes(date, ofItemAtPath: file.path)
+        let first = await files.read([folder])
+        #expect(first["here"]?[id]?.first?.items.map(\.text) == ["Milk"])
+
+        let wroteSecond = await files.write(copy(air, [task("Oat milk")]), to: file)
+        #expect(wroteSecond)
+        try FileManager.default.setAttributes(date, ofItemAtPath: file.path)
+        let second = await files.read([folder])
+        #expect(second["here"]?[id]?.first?.items.map(\.text) == ["Oat milk"])
+
+        // And one that can't be written says so
+        let nowhere = URL(fileURLWithPath: "/dev/null/lists/\(id)/\(air).json")
+        let wroteNowhere = await files.write(copy(air, []), to: nowhere)
+        #expect(!wroteNowhere)
     }
 }

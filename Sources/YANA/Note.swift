@@ -177,6 +177,10 @@ struct ToDo: Codable, Equatable, Sendable {
         id == other.id && text == other.text && done == other.done
     }
 
+    /// Whether nothing's typed in it yet. An empty task isn't saved or synced: it's one just opened to type in, or one
+    /// emptied to delete it.
+    var isBlank: Bool { text.trimmingCharacters(in: .whitespaces).isEmpty }
+
     /// Return in this task, with `selection` (a range of its text, counted like a text field counts) selected: the text
     /// before the selection stays in this task and the text after it becomes a new task below, so at the end of a task
     /// Return opens an empty one. Nil at the very start of the task, where Return opens an empty task above it instead.
@@ -207,5 +211,23 @@ extension Array where Element == ToDo {
     /// Whether the two lists show the same tasks in the same order
     func looksLike(_ other: [ToDo]) -> Bool {
         count == other.count && zip(self, other).allSatisfy { $0.looksLike($1) }
+    }
+
+    /// What a synced list shows once other devices' changes are merged in, where `self` is what it shows now: the
+    /// `merged` tasks, with this list's empty tasks put back in, since those aren't synced. Each stays after the task
+    /// it follows now.
+    func showing(_ merged: [ToDo]) -> [ToDo] {
+        var shown: [ToDo] = []
+        var ids: Set<UUID> = []
+        for item in merged where ids.insert(item.id).inserted {
+            shown.append(item)
+        }
+        for (index, item) in enumerated() where item.isBlank && !ids.contains(item.id) {
+            let above = self[..<index].last { ids.contains($0.id) }
+            let place = above.flatMap { above in shown.firstIndex { $0.id == above.id } }.map { $0 + 1 } ?? 0
+            shown.insert(item, at: place)
+            ids.insert(item.id)
+        }
+        return shown
     }
 }

@@ -15,6 +15,7 @@ final class SyncSheet: NSObject {
     private let devicesStack = NSStackView()
     private var boxes: [(id: String, box: NSButton)] = []
     private var shownDevices: Set<String> = []
+    private let list: UUID
     private let current: SyncInfo?
     private var onChoice: ((Choice?) -> Void)?
     private weak var parent: NSWindow?
@@ -25,7 +26,8 @@ final class SyncSheet: NSObject {
     private static let chooseTag = -2
     private static let width: CGFloat = 340
 
-    init(listTitle: String, current: SyncInfo?) {
+    init(listTitle: String, list: UUID, current: SyncInfo?) {
+        self.list = list
         self.current = current
         super.init()
 
@@ -190,6 +192,19 @@ final class SyncSheet: NSObject {
         me.isEnabled = false
         devicesStack.addArrangedSubview(me)
 
+        // Said here, since nothing else shows that a folder has stopped working
+        if let folder = pickedFolder, !folder.canBeRead {
+            let warning = NSTextField(wrappingLabelWithString: "YANA can't open this folder, so nothing syncs through it. Check that it's still there, and that YANA is allowed to use it in System Settings › Privacy & Security › Files and Folders.")
+            warning.preferredMaxLayoutWidth = Self.width - 20
+            warning.textColor = .systemRed
+            warning.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            devicesStack.addArrangedSubview(warning)
+            // The devices it goes to now all stay
+            shownDevices = []
+            if panel.isVisible { fit() }
+            return
+        }
+
         let cards = (pickedFolder?.devices() ?? []).filter { $0.id != ThisDevice.id }
         shownDevices = Set(cards.map(\.id))
         for card in cards {
@@ -198,6 +213,16 @@ final class SyncSheet: NSObject {
             box.toolTip = "Last seen \(card.seen.formatted(date: .abbreviated, time: .shortened))"
             devicesStack.addArrangedSubview(box)
             boxes.append((card.id, box))
+            if let status = heard(from: card) {
+                let label = NSTextField(labelWithString: status)
+                label.textColor = .secondaryLabelColor
+                label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+                // Under the device's name, not its checkbox
+                let row = NSStackView(views: [label])
+                row.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 0)
+                devicesStack.setCustomSpacing(2, after: box)
+                devicesStack.addArrangedSubview(row)
+            }
         }
         if cards.isEmpty {
             let none = NSTextField(wrappingLabelWithString: "No other devices use this folder yet. On your other Mac, choose Add Sync Folder… in YANA's menu and pick this folder, and it shows up here.")
@@ -207,6 +232,18 @@ final class SyncSheet: NSObject {
             devicesStack.addArrangedSubview(none)
         }
         if panel.isVisible { fit() }
+    }
+
+    /// When a device the list already goes to last wrote its copy of it, which it does whenever it has a change to pass
+    /// on. It tells whether that device's changes are reaching this Mac.
+    private func heard(from card: DeviceCard) -> String? {
+        guard let current = current, current.devices.contains(card.id), let folder = pickedFolder,
+              folder.id == current.folder else { return nil }
+        let file = folder.copy(of: list, by: card.id)
+        guard let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+        else { return "Hasn't picked up this list yet" }
+        // Its clock may be a little ahead of this Mac's
+        return "Last heard from \(min(date, Date()).formatted(.relative(presentation: .named)))"
     }
 
     // MARK: Buttons

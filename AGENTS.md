@@ -81,12 +81,23 @@ Everything must build with the Command Line Tools alone, without Xcode.
 - **The merge** (`SyncMerge.merge`) is per task, latest change wins, a deletion wins over an older change, the order
   comes from the latest copy to change it, and only devices still on the list count. It's pure, so it's what the tests
   cover.
-- **Other devices' changes wait while you edit or drag a task** (`TodoList.isBusy`), then `TodoList.show(_:)` rebuilds
-  the rows and clears that list's undo.
+- **Other devices' changes show at once, cursor in a task or not.** `TodoList.show(_:)` keeps the row of every task
+  that's still there, so the one being edited keeps its cursor and what's typed, unless another device changed or
+  deleted that very task. Empty tasks just opened stay where they are (`[ToDo].showing`), since they aren't synced.
+  It clears that list's undo. Only a click or drag in progress makes changes wait (`TodoList.isDragging`), and never
+  for long. 1.7.0 made them wait for any task being edited, and skipped writing this Mac's copy while they waited, so
+  a cursor left in a task stopped that Mac syncing either way.
+- **A sync runs every 3 seconds, right after a save, and when the note is shown or hidden** (`ListSync.run`). The
+  timer alone can be slowed by App Nap while the note is hidden.
+- **This Mac's copy is written whenever the folder's doesn't match**, and tried again if it still doesn't after 15
+  seconds (`ListSync.writeSettles`) or the write failed.
 - **Starting to sync gives the list a new id**, so files left from an earlier time it synced don't mix in. Stopping
   writes an empty copy without this Mac in its devices; being taken off by another device deletes this Mac's copy.
 - **Reading and writing is in the `SyncFiles` actor**, off the main thread, since a file in iCloud Drive may have to
-  download first.
+  download first. Every copy is read every time: a modification date can't tell whether one changed, since a sync
+  service may keep dates only to the second.
+- **Sync Settings says when each device was last heard from**: the modification date of its copy of the list, which
+  it writes whenever it has a change to pass on. It's the first thing to look at when two Macs don't agree.
 
 ## Releasing
 

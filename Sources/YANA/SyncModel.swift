@@ -167,6 +167,12 @@ struct SyncFolder: Codable, Equatable, Sendable {
         return parent.lastPathComponent
     }
 
+    /// Whether YANA can read what's in it. It can't when the folder is gone, or when macOS hasn't let YANA use the
+    /// place it's in, such as iCloud Drive.
+    var canBeRead: Bool {
+        (try? FileManager.default.contentsOfDirectory(atPath: listsFolder.path)) != nil
+    }
+
     /// The devices that use it, newest first, read from its devices folder
     func devices() -> [DeviceCard] {
         let files = (try? FileManager.default.contentsOfDirectory(at: devicesFolder, includingPropertiesForKeys: nil,

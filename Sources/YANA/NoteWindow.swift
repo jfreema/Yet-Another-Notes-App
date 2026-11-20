@@ -144,10 +144,13 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         NSApp.activateRegardless()
         window.makeKeyAndOrderFront(nil)
         pages[selected].focus()
+        // What other devices changed while the note was hidden shows now
+        listSync.run()
     }
 
     func hide() {
         save()
+        listSync.run()
         window.orderOut(nil)
         // Hands the focus back to the app you were in
         NSApp.hide(nil)
@@ -161,6 +164,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
 
     func windowDidResignKey(_ notification: Notification) {
         save()
+        listSync.run()
     }
 
     // MARK: Tabs
@@ -293,7 +297,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         select(index)
         let page = pages[index]
         // Kept until the next one, since its own button is still finishing when it reports back
-        let sheet = SyncSheet(listTitle: page.note.title, current: page.sync)
+        let sheet = SyncSheet(listTitle: page.note.title, list: page.id, current: page.sync)
         syncSheet = sheet
         sheet.begin(for: window) { [weak self] choice in
             guard let self else { return }
@@ -475,7 +479,11 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         updateTabs()
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.save() }
+            MainActor.assumeIsolated {
+                self?.save()
+                // A synced list's changes go to the other devices now, not at the next look
+                self?.listSync.run()
+            }
         }
     }
 
@@ -620,7 +628,9 @@ extension NoteWindowController: SyncHost {
     func showSynced(_ note: Note, on page: NotePage) {
         (page as? TodoList)?.show(note.items)
         page.sync = note.sync
-        noteChanged()
+        updateTabs()
+        // Saved as it is, not as a change made here, which would go looking for the other devices' changes again
+        save()
     }
 
     func addSynced(_ note: Note) {

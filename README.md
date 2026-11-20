@@ -36,7 +36,7 @@ A to-do list can sync with YANA on your other Macs. Each list syncs on its own, 
 
 The list appears on the other Macs within seconds, as its own tab, with a sync mark. Changes on any of them merge task by task: two Macs can change different tasks at once, and when both change the same task, the later change wins. Lists sent from other Macs get a tab even when you already have four.
 
-**Sync Settings for This List…** changes which Macs get it, or stops it syncing (each Mac keeps its own copy). Unticking a Mac takes the list off that Mac. Deleting a synced list's tab removes it from this Mac only.
+**Sync Settings for This List…** changes which Macs get it, or stops it syncing (each Mac keeps its own copy). Unticking a Mac takes the list off that Mac. Deleting a synced list's tab removes it from this Mac only. Under each Mac it says when YANA last heard from it, which is the last time that Mac had a change to pass on.
 
 Only to-do lists sync, not notes. Any folder that syncs between your Macs works, such as Dropbox or Syncthing. YANA writes small files in it: one per Mac in `devices`, and one per Mac per list in `lists`.
 
