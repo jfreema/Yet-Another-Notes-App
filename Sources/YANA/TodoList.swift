@@ -683,9 +683,9 @@ final class TaskField: NSTextField {
         invalidateIntrinsicContentSize()
     }
 
-    /// Makes `row` as tall as this text's lines need, with a point clear above and below, and keeps `control`, at its
-    /// left, on the first line however many there are. Gives back the constraint that keeps it there, which goes by
-    /// the font (`firstLineCenter`).
+    /// Makes `row` as tall as this text's lines need, or as `control` at its left if that's taller, with a point clear
+    /// above and below. Keeps `control` on the first line however many there are. Gives back the constraint that keeps
+    /// it there, which goes by the font (`firstLineCenter`).
     func fit(_ row: NSView, beside control: NSView) -> NSLayoutConstraint {
         let top = topAnchor.constraint(equalTo: row.topAnchor, constant: 1)
         let bottom = row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 1)
@@ -697,8 +697,8 @@ final class TaskField: NSTextField {
             top, bottom, onFirstLine,
             topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 1),
             row.bottomAnchor.constraint(greaterThanOrEqualTo: bottomAnchor, constant: 1),
-            control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor),
-            row.bottomAnchor.constraint(greaterThanOrEqualTo: control.bottomAnchor),
+            control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 1),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: control.bottomAnchor, constant: 1),
         ])
         return onFirstLine
     }

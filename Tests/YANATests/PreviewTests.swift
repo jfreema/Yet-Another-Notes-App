@@ -94,8 +94,8 @@ struct PreviewTests {
         let lists = NoteWindowController.choice(
             "Bring lists from “YANA Sync” to this Mac?",
             "These lists sync through the folder on your other devices. A ticked one gets a tab here and stays in sync with them.",
-            from: ["Camping (5 tasks, on MacBook Air)", "Groceries (12 tasks, on MacBook Air and iPhone)",
-                   "A list with a very long name that goes on and on (1 task, on MacBook Air)"],
+            from: [("Camping", "5 tasks, on MacBook Air"), ("Groceries", "12 tasks, on MacBook Air and iPhone"),
+                   ("A list with a very long name that goes on and on", "1 task, on MacBook Air, MacBook Pro and iPhone")],
             button: "Bring Here")
         lists.alert.layout()
         try draw(try #require(lists.alert.window.contentView), as: "sheet-lists")
@@ -103,7 +103,7 @@ struct PreviewTests {
         let device = NoteWindowController.choice(
             "“iPhone” now uses “YANA Sync”",
             "Send it the lists that sync through that folder? A ticked list shows up on it and stays in sync. Sync Settings for a list changes this later.",
-            from: ["Camping", "Groceries"], button: "Send")
+            from: [("Camping", nil), ("Groceries", nil)], button: "Send")
         device.alert.layout()
         try draw(try #require(device.alert.window.contentView), as: "sheet-device")
     }

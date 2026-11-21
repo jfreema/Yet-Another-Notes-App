@@ -485,8 +485,8 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         if lists.count > shown.count {
             about += " There are \(lists.count - shown.count) more: choose Add Sync Folder… and pick this folder again to see them."
         }
-        choose("Bring lists from “\(folder.name)” to this Mac?", about, from: shown.map(\.summary),
-               button: "Bring Here") { [weak self] ticked in
+        choose("Bring lists from “\(folder.name)” to this Mac?", about,
+               from: shown.map { ($0.title, $0.detail) }, button: "Bring Here") { [weak self] ticked in
             guard let self, !ticked.isEmpty else { return }
             let ids = ticked.map { shown[$0].id }
             Task {
@@ -497,11 +497,11 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// A sheet with a ticked checkbox for each of `titles`. Its first button gives back the ones left ticked, by their
-    /// place in `titles`. Not Now gives back nothing.
-    private func choose(_ message: String, _ about: String, from titles: [String], button: String,
-                        then: @escaping ([Int]) -> Void) {
-        let (alert, boxes) = Self.choice(message, about, from: titles, button: button)
+    /// A sheet with a ticked checkbox for each of `choices`. Its first button gives back the ones left ticked, by their
+    /// place in `choices`. Not Now gives back nothing.
+    private func choose(_ message: String, _ about: String, from choices: [(title: String, detail: String?)],
+                        button: String, then: @escaping ([Int]) -> Void) {
+        let (alert, boxes) = Self.choice(message, about, from: choices, button: button)
         alert.beginSheetModal(for: window) { response in
             MainActor.assumeIsolated {
                 guard response == .alertFirstButtonReturn else { return then([]) }
@@ -510,28 +510,46 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// The alert `choose` shows, with its checkboxes in the order of `titles`
-    static func choice(_ message: String, _ about: String, from titles: [String],
+    /// The alert `choose` shows, with its checkboxes in the order of `choices`. A choice's detail goes under its title,
+    /// smaller.
+    static func choice(_ message: String, _ about: String, from choices: [(title: String, detail: String?)],
                        button: String) -> (alert: NSAlert, boxes: [NSButton]) {
         let alert = NSAlert()
         alert.messageText = message
         alert.informativeText = about
-        let width: CGFloat = 260
-        let boxes = titles.map { title in
-            let box = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+        // As wide as an alert's own text
+        let width: CGFloat = 228
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        var boxes: [NSButton] = []
+        for choice in choices {
+            let box = NSButton(checkboxWithTitle: choice.title, target: nil, action: nil)
             box.state = .on
             // A long name is cut short, and shown whole when the mouse rests on it
             box.lineBreakMode = .byTruncatingTail
-            box.toolTip = title
+            box.toolTip = choice.title
             box.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            return box
+            box.widthAnchor.constraint(lessThanOrEqualToConstant: width).isActive = true
+            stack.addArrangedSubview(box)
+            boxes.append(box)
+            guard let detail = choice.detail else { continue }
+            let label = NSTextField(labelWithString: detail)
+            label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            label.textColor = .secondaryLabelColor
+            label.lineBreakMode = .byTruncatingTail
+            label.toolTip = detail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            // Under the title, not the checkbox
+            let row = NSStackView(views: [label])
+            row.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 0)
+            row.widthAnchor.constraint(lessThanOrEqualToConstant: width).isActive = true
+            stack.setCustomSpacing(1, after: box)
+            stack.addArrangedSubview(row)
         }
-        let stack = NSStackView(views: boxes)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        let height = boxes.reduce(0) { $0 + $1.intrinsicContentSize.height } + CGFloat(max(boxes.count - 1, 0)) * 6
-        stack.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        stack.widthAnchor.constraint(equalToConstant: width).isActive = true
+        stack.frame = NSRect(x: 0, y: 0, width: width, height: stack.fittingSize.height)
         alert.accessoryView = stack
         alert.addButton(withTitle: button)
         alert.addButton(withTitle: "Not Now")
@@ -555,7 +573,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         guard !lists.isEmpty else { return showOffersSoon() }
         choose("“\(device.name)” now uses “\(folder.name)”",
                "Send it the lists that sync through that folder? A ticked list shows up on it and stays in sync. Sync Settings for a list changes this later.",
-               from: lists.map { $0.note.title }, button: "Send") { [weak self] ticked in
+               from: lists.map { ($0.note.title, nil) }, button: "Send") { [weak self] ticked in
             guard let self else { return }
             for page in ticked.map({ lists[$0] }) {
                 guard let sync = page.sync, self.pages.contains(where: { $0 === page }) else { continue }

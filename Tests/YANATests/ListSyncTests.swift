@@ -104,11 +104,14 @@ struct ListSyncTests {
         try JSONDecoder().decode(SyncedList.self, from: Data(contentsOf: folder.copy(of: list, by: me)))
     }
 
-    /// The task with this text, to put the cursor in
+    /// The task with this text, to put the cursor in. The row for adding a task isn't one.
     private func field(_ text: String, in view: NSView) -> TaskField? {
         for subview in view.subviews {
-            if let task = subview as? TaskField, task.stringValue == text { return task }
-            if let task = field(text, in: subview) { return task }
+            if let row = subview as? ToDoRow {
+                if row.field.stringValue == text { return row.field }
+            } else if let task = field(text, in: subview) {
+                return task
+            }
         }
         return nil
     }
@@ -352,7 +355,7 @@ struct ListSyncTests {
         #expect(host.notePages.isEmpty)
         let lists = await sync.lists(in: folder)
         #expect(lists == [FolderList(id: id, title: "Groceries", tasks: 2, devices: ["MacBook Air"])])
-        #expect(lists.first?.summary == "Groceries (2 tasks, on MacBook Air)")
+        #expect(lists.first?.detail == "2 tasks, on MacBook Air")
 
         await sync.join([id], in: folder)
         let page = try #require(host.notePages.first)

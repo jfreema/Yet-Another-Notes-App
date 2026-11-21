@@ -48,11 +48,11 @@ struct FolderList: Equatable, Sendable {
     /// The names of the devices it's on
     var devices: [String]
 
-    /// How it reads beside its tick: “Groceries (5 tasks, on Jared's MacBook Air)”
-    var summary: String {
-        var parts = [tasks == 1 ? "1 task" : "\(tasks) tasks"]
+    /// What it says under its name: “5 tasks, on Jared's MacBook Air”
+    var detail: String {
+        var parts = [tasks == 0 ? "No tasks" : tasks == 1 ? "1 task" : "\(tasks) tasks"]
         if !devices.isEmpty { parts.append("on " + devices.formatted(.list(type: .and))) }
-        return "\(title) (\(parts.joined(separator: ", ")))"
+        return parts.joined(separator: ", ")
     }
 }
 
