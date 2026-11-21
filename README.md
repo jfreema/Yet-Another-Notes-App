@@ -4,9 +4,9 @@
 
 <p align="center">Yet Another Notes App: quick notes and to-do lists that live in your Mac's menu bar.</p>
 
-<p align="center"><a href="https://github.com/jfreema/Yet-Another-Notes-App/raw/main/downloads/YANA.zip"><b>Download YANA</b></a></p>
+<p align="center"><a href="https://github.com/jfreema/Yet-Another-Notes-App/releases/latest/download/YANA.zip"><b>Download YANA</b></a></p>
 
-<p align="center">Version 1.8.0 · macOS 14 or later · Apple silicon or Intel</p>
+<p align="center">Version 1.9.0 · macOS 14 or later · Apple silicon or Intel</p>
 
 <p align="center">
   <img src="docs/screenshot-note.png" width="340" alt="A note with line numbers and three tabs">

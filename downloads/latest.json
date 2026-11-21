@@ -1,7 +1,7 @@
 {
-  "version": "1.8.0",
-  "url": "https://github.com/jfreema/Yet-Another-Notes-App/raw/main/downloads/YANA.zip",
-  "sha256": "97a13395e4b62431d960dd2be2bcc3fa3f256d6a73e6950d56d8e1ea1bf51bf8",
+  "version": "1.9.0",
+  "url": "https://github.com/jfreema/Yet-Another-Notes-App/releases/download/v1.9.0/YANA.zip",
+  "sha256": "68c5d65924d6c036b73833df5e46ab24d6b979273a04efab42cba79359be9875",
   "team": "885XHF7XLL",
   "notarized": true
 }
