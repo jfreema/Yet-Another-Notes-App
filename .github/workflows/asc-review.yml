@@ -1,0 +1,28 @@
+name: App Store review (temporary)
+
+# TEMPORARY, on this branch only: looks at the iPhone app's App Store version and its review. Not for main.
+
+on:
+  push:
+    branches: [claude/project-thread-7c1x2i]
+    paths: [.github/scripts/asc_review.py, .github/scripts/asc_description.txt, .github/workflows/asc-review.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asc-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install -q pyjwt cryptography requests
+      - run: python3 .github/scripts/asc_review.py
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.ASC_KEY }}
