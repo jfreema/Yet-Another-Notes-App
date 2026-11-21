@@ -65,13 +65,46 @@ final class ListUITests: XCTestCase {
         // A short swipe shows Delete, and a long one deletes
         let delete = app.buttons["Delete"]
         if delete.waitForExistence(timeout: 2) { delete.tap() }
+        undoBrings("Lemons", backInto: groceries)
+    }
+
+    func testUndoPutsClearedTasksBack() {
+        app.buttons["Clear Checked (2)"].tap()
+        let clear = app.buttons["Clear Checked"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5), app.debugDescription)
+        clear.tap()
+        XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(task("Sourdough").exists)
+        undoBrings("Eggs", backInto: groceries)
+    }
+
+    func testUndoWithNothingBeforeIt() {
+        app.terminate()
+        app.launchArguments += ["-YANAShow", "undo"]
+        app.launch()
+        XCTAssertTrue(task("Milk").waitForExistence(timeout: 15), app.debugDescription)
+        undoBrings("Eggs", backInto: groceries)
+    }
+
+    /// Taps Undo, and checks the task is back in its place and the Undo bar has gone
+    private func undoBrings(_ text: String, backInto all: [String]) {
         let undo = app.buttons["Undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(task("Lemons").exists)
-        undo.tap()
-        XCTAssertTrue(task("Lemons").waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(task(text).exists)
+        var ways: [String] = []
+        for way in ["tap", "tap again", "coordinate", "press"] where undo.exists && !task(text).exists {
+            ways.append("\(way) hittable=\(undo.isHittable) frame=\(undo.frame)")
+            switch way {
+            case "coordinate": undo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            case "press": undo.press(forDuration: 0.3)
+            default: undo.tap()
+            }
+            _ = task(text).waitForExistence(timeout: 4)
+        }
+        XCTAssertTrue(task(text).exists, "UNDO WAYS \(ways)\n\(app.debugDescription)")
+        XCTAssertEqual(ways.count, 1, "UNDO WAYS \(ways)")
         sleep(1)
-        XCTAssertEqual(order(groceries), groceries)
+        XCTAssertEqual(order(all), all)
         XCTAssertFalse(undo.exists)
     }
 

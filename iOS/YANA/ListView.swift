@@ -292,16 +292,21 @@ struct UndoBar: View {
     let undo: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 4) {
             Text(text)
                 .lineLimit(1)
-            Spacer(minLength: 8)
-            Button("Undo", action: undo)
-                .fontWeight(.semibold)
+            Spacer(minLength: 4)
+            // The whole right end of the bar takes the tap, not just the word
+            Button(action: undo) {
+                Text("Undo")
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+            }
         }
         .font(.subheadline)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.leading, 16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(.horizontal, 16)
         .padding(.bottom, 8)

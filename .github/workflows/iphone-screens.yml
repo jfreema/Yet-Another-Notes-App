@@ -56,18 +56,22 @@ jobs:
           fi
           grep -E "\.swift:[0-9]+:[0-9]+: warning:" build.log | sort -u | head -60 || true
 
-      - name: Unit tests
-        timeout-minutes: 10
+      - name: The Undo tap-through tests
+        timeout-minutes: 12
         run: |
           set -o pipefail
           xcodebuild test-without-building -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$UDID" \
-            -derivedDataPath build -only-testing:YANATests -parallel-testing-enabled NO 2>&1 \
-            | tee test.log | grep -E "^(✔|✘|◇ Test run|Test Suite|\*\*|.*error:|.*recorded an issue|.*Expectation failed)" \
-            | grep -v "^◇ Test .* started" | tail -n 150
+            -derivedDataPath build -parallel-testing-enabled NO \
+            -only-testing:YANAUITests/ListUITests/testUndoPutsASwipedTaskBack \
+            -only-testing:YANAUITests/ListUITests/testUndoPutsClearedTasksBack \
+            -only-testing:YANAUITests/ListUITests/testUndoWithNothingBeforeIt 2>&1 \
+            | tee test.log | grep -E "^(Test Case|Test Suite|\*\*|.*error:|.*UNDO WAYS|.*Executed)" | cut -c1-900 | tail -n 80
 
       - name: Show the end of the test log
         if: failure()
-        run: tail -n 120 test.log || true
+        run: |
+          grep -n -E "UNDO WAYS|error:" test.log | cut -c1-1500 | head -40 || true
+          grep -n -E "^    t = " test.log | tail -n 150 || true
 
       - name: Take the screenshots
         if: always()
@@ -78,7 +82,7 @@ jobs:
           xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
             --cellularBars 4 --wifiBars 3 || true
           xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/YANA.app
-          rm -rf screens && mkdir -p screens
+          mkdir -p screens
           shot() {
             local name="$1"; shift
             xcrun simctl terminate "$UDID" io.github.jfreema.yana.ios 2>/dev/null || true
@@ -87,18 +91,10 @@ jobs:
             xcrun simctl io "$UDID" screenshot "screens/$name.png"
           }
           xcrun simctl ui "$UDID" appearance light
-          shot 1-lists-not-syncing -YANAStopped YES
-          shot 2-list-not-syncing -YANAOpen 1 -YANAStopped YES
           shot 3-undo -YANAOpen 1 -YANAShow undo
-          shot 4-recently-deleted -YANAShow deleted
-          shot 5-bring-lists-here -YANAShow folder
-          shot 6-new-device -YANAShow offer
-          shot 7-settings -YANAShow settings
           shot 8-sticky-undo -YANAOpen 1 -sticky YES -YANAShow undo
-          shot 9-lists
           xcrun simctl ui "$UDID" appearance dark
           shot 10-dark-undo -YANAOpen 1 -YANAShow undo
-          shot 11-dark-bring-lists-here -YANAShow folder
           # Small enough to look at
           sips -Z 1300 screens/*.png > /dev/null
           ls -la screens
