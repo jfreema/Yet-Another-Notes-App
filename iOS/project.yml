@@ -44,6 +44,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.jfreema.yana.ios.tests
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_STYLE: Automatic
+  YANAUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: YANAUITests
+    dependencies:
+      - target: YANA
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.jfreema.yana.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        TEST_TARGET_NAME: YANA
 schemes:
   YANA:
     build:
@@ -52,3 +65,4 @@ schemes:
     test:
       targets:
         - YANATests
+        - YANAUITests
