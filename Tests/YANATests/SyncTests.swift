@@ -67,6 +67,23 @@ struct SyncTests {
         #expect(stamped.items.first?.changed == at(10))
     }
 
+    @Test func stampsARename() {
+        let before = synced([task("Milk")])
+        var now = before
+        now.name = "Groceries"
+        let stamped = now.stamped(since: before, at: at(10))
+        #expect(stamped.sync?.nameChanged == at(10))
+        #expect(stamped.sync?.orderChanged == at(0))
+        #expect(stamped.items.map(\.changed) == [at(0)])
+        // Taking the name off is a change too
+        var unnamed = stamped
+        unnamed.name = nil
+        #expect(unnamed.stamped(since: stamped, at: at(20)).sync?.nameChanged == at(20))
+        // And keeping it isn't
+        #expect(stamped.stamped(since: stamped, at: at(30)).sync?.nameChanged == at(10))
+        #expect(before.stamped(since: before, at: at(30)).sync?.nameChanged == nil)
+    }
+
     @Test func onlyStampsSyncedLists() {
         let before = Note(kind: .list, items: [ToDo(text: "Milk")])
         var now = before
@@ -171,6 +188,63 @@ struct SyncTests {
         #expect(again.items.map(\.text) == ["Milk"])
     }
 
+    // MARK: Names
+
+    private func named(_ device: String, _ name: String?, at seconds: TimeInterval?) -> SyncedList {
+        var list = copy(device, [task("Milk")])
+        list.name = name
+        list.nameChanged = seconds.map { at($0) }
+        return list
+    }
+
+    @Test func takesTheLatestName() {
+        let merged = SyncMerge.merge([named("mac", "Groceries", at: 5), named("air", "Shopping", at: 7)], now: at(10))
+        #expect(merged.name == "Shopping")
+        #expect(merged.nameChanged == at(7))
+        #expect(merged.device == "mac")
+        #expect(SyncMerge.merge([named("mac", "Groceries", at: 8), named("air", "Shopping", at: 7)], now: at(10)).name
+                == "Groceries")
+        // Taking the name off goes to the others too
+        let off = SyncMerge.merge([named("mac", "Groceries", at: 5), named("air", nil, at: 9)], now: at(10))
+        #expect(off.name == nil)
+        #expect(off.nameChanged == at(9))
+    }
+
+    @Test func aCopyFromBeforeNamesDoesntChangeTheName() {
+        // Copies from 1.7 have no name and no date for it
+        #expect(SyncMerge.merge([named("mac", "Groceries", at: 5), named("air", nil, at: nil)], now: at(10)).name
+                == "Groceries")
+        let fromOld = SyncMerge.merge([named("mac", nil, at: nil), named("air", "Groceries", at: 5)], now: at(10))
+        #expect(fromOld.name == "Groceries")
+        #expect(fromOld.nameChanged == at(5))
+        // With no dates at all, this device's name stays
+        #expect(SyncMerge.merge([named("mac", "Groceries", at: nil), named("air", nil, at: nil)], now: at(10)).name
+                == "Groceries")
+        #expect(SyncMerge.merge([named("mac", nil, at: nil), named("air", nil, at: nil)], now: at(10)).name == nil)
+    }
+
+    @Test func onlyCountsTheNameFromDevicesTheListGoesTo() {
+        var gone = named("old", "Old name", at: 9)
+        gone.devices = ["mac", "air", "old"]
+        let merged = SyncMerge.merge([named("mac", "Groceries", at: 5), gone], now: at(10))
+        #expect(merged.name == "Groceries")
+    }
+
+    @Test func takesTheNameFromAMergedCopy() {
+        var note = synced([task("Milk")])
+        note.name = "Old"
+        var list = SyncedList(note, device: "mac")!
+        list.name = "Groceries"
+        list.nameChanged = at(5)
+        let adopted = note.adopting(list)
+        #expect(adopted.name == "Groceries")
+        #expect(adopted.title == "Groceries")
+        #expect(adopted.sync?.nameChanged == at(5))
+        list.name = nil
+        #expect(note.adopting(list).name == nil)
+        #expect(note.adopting(list).title == "Milk")
+    }
+
     @Test func forgetsOldDeletions() {
         let gone = UUID()
         let mine = copy("mac", [], deleted: [gone: 0])
@@ -253,10 +327,46 @@ struct SyncTests {
     // MARK: Files
 
     @Test func readsBackWhatItWrites() throws {
-        let list = copy("mac", [task("Milk", done: true, at: 1.234567), task("Eggs")], deleted: [UUID(): 2.5])
+        var list = copy("mac", [task("Milk", done: true, at: 1.234567), task("Eggs")], deleted: [UUID(): 2.5])
         let data = try list.encoded()
         // Exactly, or a device would write its copy again and again
         #expect(try JSONDecoder().decode(SyncedList.self, from: data) == list)
+        list.name = "Groceries"
+        list.nameChanged = at(3.5)
+        #expect(try JSONDecoder().decode(SyncedList.self, from: list.encoded()) == list)
+    }
+
+    /// A copy as YANA 1.7 reads and writes it, before lists had names
+    private struct CopyBeforeNames: Codable {
+        var format: Int
+        var device: String
+        var items: [ToDo]
+        var orderChanged: Date
+        var devices: [String]
+        var devicesChanged: Date
+        var deleted: [String: Date]
+    }
+
+    @Test func staysReadableByOlderVersions() throws {
+        // An unnamed list's copy is the same as before names
+        let unnamed = copy("mac", [task("Milk")])
+        let text = try #require(String(data: unnamed.encoded(), encoding: .utf8))
+        #expect(!text.contains("name"))
+        // A named one still reads in 1.7, which skips the name
+        var list = copy("mac", [task("Milk", done: true, at: 1), task("Eggs")], deleted: [UUID(): 2])
+        list.name = "Groceries"
+        list.nameChanged = at(3)
+        let old = try JSONDecoder().decode(CopyBeforeNames.self, from: list.encoded())
+        #expect(old.items == list.items)
+        #expect(old.devices == list.devices)
+        #expect(old.deleted == list.deleted)
+        // And what 1.7 writes reads here without a name
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let back = try JSONDecoder().decode(SyncedList.self, from: encoder.encode(old))
+        #expect(back.name == nil)
+        #expect(back.nameChanged == nil)
+        #expect(back.items == list.items)
     }
 
     @Test func readsTheDevicesCopiesFromAFolder() async throws {

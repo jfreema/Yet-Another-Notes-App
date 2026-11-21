@@ -72,8 +72,9 @@ final class ListSync {
             item.changed = now
             return item
         }
+        // A name it already has goes with it
         note.sync = SyncInfo(folder: folder.id, devices: [ThisDevice.id] + devices, devicesChanged: now,
-                             orderChanged: now, deleted: [:])
+                             orderChanged: now, deleted: [:], nameChanged: note.name == nil ? nil : now)
         page.id = note.id
         page.sync = note.sync
         known[note.id] = note
@@ -167,7 +168,7 @@ final class ListSync {
             }
 
             let result = local.adopting(merged)
-            if !result.items.looksLike(local.items) {
+            if !result.items.looksLike(local.items) || result.name != local.name {
                 // Only a task under the mouse makes the others' changes wait, and only until the mouse comes up. A
                 // task with the cursor in it doesn't: the cursor can sit there for hours, and then nothing would sync.
                 if (page as? TodoList)?.isDragging == true { continue }
@@ -204,8 +205,9 @@ final class ListSync {
                 if let when = left[id], merged.devicesChanged <= when { continue }
                 left[id] = nil
                 let sync = SyncInfo(folder: folder.id, devices: merged.devices, devicesChanged: merged.devicesChanged,
-                                    orderChanged: merged.orderChanged, deleted: merged.deleted)
-                let note = Note(id: id, kind: .list, items: merged.items, sync: sync)
+                                    orderChanged: merged.orderChanged, deleted: merged.deleted,
+                                    nameChanged: merged.nameChanged)
+                let note = Note(id: id, kind: .list, items: merged.items, name: merged.name, sync: sync)
                 known[id] = note
                 logger.notice("Adding a list another device syncs here")
                 host.addSynced(note)

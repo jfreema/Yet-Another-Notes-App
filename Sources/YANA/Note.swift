@@ -12,6 +12,8 @@ struct Note: Codable, Equatable, Sendable {
     var kind: Kind
     var text: String
     var items: [ToDo]
+    /// The name you gave it, if you did. Without one, it's named after what's in it.
+    var name: String?
     /// The text file it was opened from or last saved to, which Save writes back to
     var file: URL?
     /// How a to-do list syncs with other devices, once it does
@@ -20,18 +22,30 @@ struct Note: Codable, Equatable, Sendable {
     /// The most tabs you can make. Lists synced from other devices can go past it.
     static let limit = 4
 
-    init(id: UUID = UUID(), kind: Kind, text: String = "", items: [ToDo] = [], file: URL? = nil,
+    init(id: UUID = UUID(), kind: Kind, text: String = "", items: [ToDo] = [], name: String? = nil, file: URL? = nil,
          sync: SyncInfo? = nil) {
         self.id = id
         self.kind = kind
         self.text = text
         self.items = items
+        self.name = Self.name(name)
         self.file = file
         self.sync = sync
     }
 
-    /// The tab's name: a note's first line, or a list's first task
+    /// The tab's name: the name you gave it, else a note's first line or a list's first task
     var title: String {
+        name ?? contentsTitle
+    }
+
+    /// A name as typed, without spaces around it. Nothing typed is no name.
+    static func name(_ typed: String?) -> String? {
+        guard let typed = typed?.trimmingCharacters(in: .whitespacesAndNewlines), !typed.isEmpty else { return nil }
+        return typed
+    }
+
+    /// What it's named after without a name of its own: a note's first line, or a list's first task
+    var contentsTitle: String {
         var first: String?
         switch kind {
         case .text:
@@ -57,10 +71,10 @@ struct Note: Codable, Equatable, Sendable {
         }
     }
 
-    /// The note as a to-do list, a task to each line that has something on it. It isn't tied to the note's file, since
-    /// saving a list there would change what's in it.
+    /// The note as a to-do list, a task to each line that has something on it, keeping its name. It isn't tied to the
+    /// note's file, since saving a list there would change what's in it.
     var asList: Note {
-        kind == .list ? self : Note(kind: .list, items: Self.tasks(fromText: text))
+        kind == .list ? self : Note(kind: .list, items: Self.tasks(fromText: text), name: name)
     }
 
     /// A task for each line with something on it. A bullet in front ("- ", "* ", "• ") is left off, and a line written
@@ -114,12 +128,13 @@ struct Note: Codable, Equatable, Sendable {
         return text.replacingOccurrences(of: "\r\n", with: "\n")
     }
 
+    /// Whether there's nothing in it, not even a name
     var isEmpty: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && items.isEmpty
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && items.isEmpty && name == nil
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, text, items, file, sync
+        case id, kind, text, items, name, file, sync
     }
 
     // Anything missing or unknown reads as empty, so a file from another version still opens. Notes from before 1.7
@@ -130,13 +145,14 @@ struct Note: Codable, Equatable, Sendable {
         kind = (try? container.decode(Kind.self, forKey: .kind)) ?? .text
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         items = try container.decodeIfPresent([ToDo].self, forKey: .items) ?? []
+        name = Self.name(try? container.decodeIfPresent(String.self, forKey: .name))
         file = try? container.decodeIfPresent(URL.self, forKey: .file)
         sync = try? container.decodeIfPresent(SyncInfo.self, forKey: .sync)
     }
 
     /// The list with change times for what's different from `before`, an earlier copy of it: a task that's new or edited
-    /// is stamped `now`, one that's gone is marked deleted at `now`, and the order is marked changed if it isn't the same.
-    /// Only a synced list keeps change times.
+    /// is stamped `now`, one that's gone is marked deleted at `now`, the order is marked changed if it isn't the same, and
+    /// so is the name. Only a synced list keeps change times.
     func stamped(since before: Note, at now: Date) -> Note {
         guard var sync else { return self }
         var stamped = self
@@ -161,6 +177,9 @@ struct Note: Codable, Equatable, Sendable {
         }
         if items.map(\.id) != before.items.map(\.id) {
             sync.orderChanged = now
+        }
+        if name != before.name {
+            sync.nameChanged = now
         }
         stamped.sync = sync
         return stamped

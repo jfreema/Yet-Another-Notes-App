@@ -150,6 +150,43 @@ struct PhoneSyncTests {
         #expect(mine.devices == [model.device, mac])
     }
 
+    @Test func namesGoBothWays() async throws {
+        let sent = try await sentFromMac()
+        #expect(model.list(sent.list)?.title == "Milk")
+        // Named on the Mac
+        try writeMacCopy(of: sent.list, SyncedList(
+            device: mac, items: [ToDo(id: sent.milk, text: "Milk", changed: earlier),
+                                 ToDo(id: sent.eggs, text: "Eggs", done: true, changed: earlier)],
+            orderChanged: earlier, devices: [mac, model.device], devicesChanged: earlier, name: "Groceries",
+            nameChanged: Date()))
+        await model.sync.flush()
+        #expect(model.list(sent.list)?.name == "Groceries")
+        #expect(model.list(sent.list)?.title == "Groceries")
+        // Renamed here
+        model.renameList(sent.list, to: " Shopping ")
+        await model.sync.flush()
+        #expect(model.list(sent.list)?.title == "Shopping")
+        let mine = try myCopy(of: sent.list)
+        #expect(mine.name == "Shopping")
+        #expect(mine.items.map(\.text) == ["Milk", "Eggs"])
+        // Nothing typed takes the name off
+        model.renameList(sent.list, to: "")
+        await model.sync.flush()
+        #expect(model.list(sent.list)?.title == "Milk")
+        #expect(try myCopy(of: sent.list).name == nil)
+    }
+
+    @Test func aNamedListStaysWithNoTasksYet() async throws {
+        let id = model.newList()
+        model.renameList(id, to: "Packing")
+        model.closed(id)
+        #expect(model.list(id)?.title == "Packing")
+        model.startSyncing(id, in: folder.id, to: [mac])
+        let list = try #require(model.list(id))
+        await model.sync.flush()
+        #expect(try myCopy(of: list.id).name == "Packing")
+    }
+
     @Test func stopSyncingKeepsTheListHere() async throws {
         let sent = try await sentFromMac()
         model.stopSyncing(sent.list)

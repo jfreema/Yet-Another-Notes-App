@@ -8,6 +8,8 @@ protocol NotePage: AnyObject {
     var note: Note { get }
     /// The note's id, which stays with the tab
     var id: UUID { get set }
+    /// The name you gave it, if you did
+    var name: String? { get set }
     /// How it syncs, if it's a synced to-do list
     var sync: SyncInfo? { get set }
     /// The text file it was opened from or last saved to
@@ -70,6 +72,7 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
     private let lineNumbers: LineNumberRuler
     private let defaultCaret: NSColor
     var id = UUID()
+    var name: String?
     var sync: SyncInfo?
     var file: URL?
     var onChange: (() -> Void)?
@@ -98,7 +101,7 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
         textView.delegate = self
     }
 
-    var note: Note { Note(id: id, kind: .text, text: textView.string, file: file) }
+    var note: Note { Note(id: id, kind: .text, text: textView.string, name: name, file: file) }
 
     func focus() {
         view.window?.makeFirstResponder(textView)

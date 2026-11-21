@@ -180,6 +180,12 @@ final class AppModel {
         change(list) { $0.clearChecked() }
     }
 
+    /// Gives a list a name of its own in place of its first task, or with nothing typed, takes its name off. A synced
+    /// list's name goes to the other devices.
+    func renameList(_ list: UUID, to name: String) {
+        change(list) { $0.name = Note.name(name) }
+    }
+
     func moveLists(from offsets: IndexSet, to destination: Int) {
         lists.move(fromOffsets: offsets, toOffset: destination)
         save()
@@ -193,9 +199,9 @@ final class AppModel {
         changed()
     }
 
-    /// A list screen was left: a new list nothing was typed in goes away again
+    /// A list screen was left: a new list nothing was typed in goes away again, unless it was given a name
     func closed(_ id: UUID) {
-        guard let note = list(id), note.sync == nil, note.syncable.items.isEmpty else { return }
+        guard let note = list(id), note.sync == nil, note.syncable.items.isEmpty, note.name == nil else { return }
         delete(id)
     }
 
@@ -214,8 +220,9 @@ final class AppModel {
             item.changed = now
             return item
         }
+        // A name it already has goes with it
         note.sync = SyncInfo(folder: folder, devices: [device] + devices, devicesChanged: now, orderChanged: now,
-                             deleted: [:])
+                             deleted: [:], nameChanged: note.name == nil ? nil : now)
         renamed[oldID] = note.id
         lists[index] = note
         changed()
@@ -363,7 +370,7 @@ final class AppModel {
                 ToDo(text: "Call the dentist"),
             ], sync: sync),
             Note(kind: .list, items: [ToDo(text: "Milk"), ToDo(text: "Eggs", done: true), ToDo(text: "Coffee beans")],
-                 sync: sync),
+                 name: "Groceries", sync: sync),
             Note(kind: .list, items: [ToDo(text: "Gift ideas"), ToDo(text: "Scarf")]),
         ]
     }

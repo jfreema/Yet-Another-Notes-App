@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// A list's tasks, numbered like on the Mac. Tap a circle to check a task off, tap its text to change it, and press
-/// Return in a task to start a new one below it. Swipe a task to delete it; Edit drags them into a new order.
+/// Return in a task to start a new one below it. Swipe a task to delete it; Edit drags them into a new order. Rename…
+/// in the … menu names the list.
 struct ListView: View {
     let listID: UUID
     @Environment(AppModel.self) private var model
@@ -12,6 +13,8 @@ struct ListView: View {
     @State private var showingSync = false
     @State private var confirmingClear = false
     @State private var confirmingDelete = false
+    @State private var renaming: Note?
+    @State private var newName = ""
 
     enum Field: Hashable {
         case task(UUID)
@@ -98,6 +101,7 @@ struct ListView: View {
         .sheet(isPresented: $showingSync) {
             SyncSettingsView(listID: listID)
         }
+        .renameAlert($renaming, name: $newName, model: model)
         .confirmationDialog("Clear the \(checked) checked tasks?", isPresented: $confirmingClear,
                             titleVisibility: .visible) {
             Button("Clear Checked", role: .destructive) { model.clearChecked(in: listID) }
@@ -121,6 +125,12 @@ struct ListView: View {
 
     private func menu(_ list: Note, checked: Int) -> some View {
         Menu {
+            Button {
+                newName = list.name ?? ""
+                renaming = list
+            } label: {
+                Label("Rename…", systemImage: "pencil")
+            }
             Button {
                 showingSync = true
             } label: {
@@ -207,6 +217,22 @@ struct TaskRow: View {
                 .foregroundStyle(item.done ? look.doneColor : look.textColor)
                 .strikethrough(item.done, color: look.doneColor)
                 .focused(focus, equals: .task(item.id))
+        }
+    }
+}
+
+extension View {
+    /// Name This List: an alert to type a list's name in, while `list` is set. `name` is what's typed, which starts as
+    /// the list's name. Leaving it empty names the list after its first task again.
+    func renameAlert(_ list: Binding<Note?>, name: Binding<String>, model: AppModel) -> some View {
+        let showing = Binding { list.wrappedValue != nil } set: { if !$0 { list.wrappedValue = nil } }
+        return alert("Name This List", isPresented: showing, presenting: list.wrappedValue) { note in
+            TextField(note.contentsTitle, text: name)
+                .submitLabel(.done)
+            Button("Rename") { model.renameList(note.id, to: name.wrappedValue) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Leave it empty to name the list after its first task.")
         }
     }
 }

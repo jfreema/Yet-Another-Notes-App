@@ -12,7 +12,10 @@ import Foundation
 //
 // A device only ever writes its own files, so a service like iCloud Drive never has two devices writing the same file.
 // Each device reads the others' copies and merges them task by task: the latest change to a task wins, and a task
-// deleted after its last change stays deleted.
+// deleted after its last change stays deleted. The list's name, once it has one, is the latest name given it.
+//
+// Anything added to a copy has to be optional, so a device on an older version still reads the newer copies (it skips
+// what it doesn't know), and a newer one reads the older copies. The list's name (1.8) was added that way.
 
 /// How a synced list syncs, kept with it in Notes.json
 struct SyncInfo: Codable, Equatable, Sendable {
@@ -25,6 +28,8 @@ struct SyncInfo: Codable, Equatable, Sendable {
     var orderChanged: Date
     /// The tasks deleted from it, by id, with when. Kept a while so an older copy doesn't bring them back.
     var deleted: [String: Date]
+    /// When it was last named, or its name taken off. Nil if it never had one while syncing.
+    var nameChanged: Date? = nil
 }
 
 /// One device's copy of a synced list: lists/<list id>/<device id>.json in its sync folder
@@ -36,9 +41,14 @@ struct SyncedList: Codable, Equatable, Sendable {
     var devices: [String]
     var devicesChanged: Date
     var deleted: [String: Date]
+    /// The list's name, if it has one. Left out of the file when it hasn't, as versions before 1.8 write it.
+    var name: String?
+    /// When the name was last given or taken off. A copy without it, such as one from before 1.8, doesn't change it.
+    var nameChanged: Date?
 
     init(device: String, items: [ToDo] = [], orderChanged: Date = .distantPast, devices: [String] = [],
-         devicesChanged: Date = .distantPast, deleted: [String: Date] = [:]) {
+         devicesChanged: Date = .distantPast, deleted: [String: Date] = [:], name: String? = nil,
+         nameChanged: Date? = nil) {
         format = 1
         self.device = device
         self.items = items
@@ -46,13 +56,16 @@ struct SyncedList: Codable, Equatable, Sendable {
         self.devices = devices
         self.devicesChanged = devicesChanged
         self.deleted = deleted
+        self.name = name
+        self.nameChanged = nameChanged
     }
 
     /// A synced list's copy, as `device` would write it
     init?(_ note: Note, device: String) {
         guard let sync = note.sync else { return nil }
         self.init(device: device, items: note.items, orderChanged: sync.orderChanged, devices: sync.devices,
-                  devicesChanged: sync.devicesChanged, deleted: sync.deleted)
+                  devicesChanged: sync.devicesChanged, deleted: sync.deleted, name: note.name,
+                  nameChanged: sync.nameChanged)
     }
 
     func encoded() throws -> Data {
@@ -63,9 +76,11 @@ struct SyncedList: Codable, Equatable, Sendable {
 }
 
 extension Note {
-    /// The list with a merged copy's tasks, devices and deletions, still synced through the same folder
+    /// The list with a merged copy's name, tasks, devices and deletions, still synced through the same folder
     func adopting(_ list: SyncedList) -> Note {
         var note = self
+        note.name = Note.name(list.name)
+        note.sync?.nameChanged = list.nameChanged
         note.items = list.items
         note.sync?.devices = list.devices
         note.sync?.devicesChanged = list.devicesChanged
@@ -83,7 +98,7 @@ enum SyncMerge {
     /// ties. The devices the list goes to are the latest change to them. Only those devices' copies count for the tasks,
     /// so a device that stopped syncing it can't bring back old ones. Each task is its latest change, unless it was
     /// deleted after that. The order is the latest copy to change it, with tasks it doesn't have yet after the task they
-    /// follow in their own copy.
+    /// follow in their own copy. The name is the latest one given, by a copy that says when.
     static func merge(_ copies: [SyncedList], now: Date) -> SyncedList {
         guard let mine = copies.first else { return SyncedList(device: "") }
         let devicesFrom = copies.max { $0.devicesChanged < $1.devicesChanged } ?? mine
@@ -128,8 +143,13 @@ enum SyncMerge {
             }
         }
 
+        // A copy from before 1.8 has no name and no date for it, so it loses to any copy that says when it was named,
+        // and when none do, this device's name stays
+        let nameFrom = counted.max { ($0.nameChanged ?? .distantPast) < ($1.nameChanged ?? .distantPast) } ?? mine
+
         return SyncedList(device: mine.device, items: order.compactMap { latest[$0] }, orderChanged: orderFrom.orderChanged,
-                          devices: devices, devicesChanged: devicesFrom.devicesChanged, deleted: deleted)
+                          devices: devices, devicesChanged: devicesFrom.devicesChanged, deleted: deleted,
+                          name: Note.name(nameFrom.name), nameChanged: nameFrom.nameChanged)
     }
 }
 

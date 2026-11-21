@@ -166,8 +166,9 @@ final class PhoneSync {
                 }
                 model.forget(left: id)
                 let sync = SyncInfo(folder: folder.id, devices: merged.devices, devicesChanged: merged.devicesChanged,
-                                    orderChanged: merged.orderChanged, deleted: merged.deleted)
-                model.addSynced(Note(id: id, kind: .list, items: merged.items, sync: sync))
+                                    orderChanged: merged.orderChanged, deleted: merged.deleted,
+                                    nameChanged: merged.nameChanged)
+                model.addSynced(Note(id: id, kind: .list, items: merged.items, name: merged.name, sync: sync))
                 if mine != merged {
                     written[id] = (merged, now)
                     writes.append((merged, folder.copy(of: id, by: me)))

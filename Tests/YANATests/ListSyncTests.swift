@@ -21,12 +21,14 @@ struct ListSyncTests {
 
         func showSynced(_ note: Note, on page: NotePage) {
             (page as? TodoList)?.show(note.items)
+            page.name = note.name
             page.sync = note.sync
         }
 
         func addSynced(_ note: Note) {
             let list = TodoList(items: note.items)
             list.id = note.id
+            list.name = note.name
             list.sync = note.sync
             notePages.append(list)
         }
@@ -63,9 +65,9 @@ struct ListSyncTests {
     }
 
     /// The other device's copy of a list, as it would write it
-    private func theirs(_ list: UUID, _ items: [ToDo]) async {
+    private func theirs(_ list: UUID, _ items: [ToDo], name: String? = nil, named: Date? = nil) async {
         let copy = SyncedList(device: air, items: items, orderChanged: earlier, devices: [me, air],
-                              devicesChanged: earlier)
+                              devicesChanged: earlier, name: name, nameChanged: named)
         let wrote = await SyncFiles().write(copy, to: folder.copy(of: list, by: air))
         #expect(wrote)
     }
@@ -157,6 +159,69 @@ struct ListSyncTests {
         #expect(list.note.items.map(\.text) == ["Bread", "Milk", "Jam", "Eggs"])
         #expect(try mine(list.id).items.map(\.text) == ["Bread", "Milk", "Jam", "Eggs"])
         #expect(host.notePages.count == 1)
+    }
+
+    @Test func namesGoBothWays() async throws {
+        defer { cleanUp() }
+        let milk = ToDo(text: "Milk", changed: earlier)
+        let (list, _) = makeList([milk])
+        let host = Host([list])
+        let sync = try syncing(host)
+        await theirs(list.id, [milk])
+        await sync.pass()
+        #expect(try mine(list.id).name == nil)
+
+        // Named here, as Rename… does, then saved
+        list.name = "Groceries"
+        _ = sync.note(of: list)
+        await sync.pass()
+        #expect(try mine(list.id).name == "Groceries")
+        let named = try #require(try mine(list.id).nameChanged)
+        #expect(named > earlier)
+
+        // The other device, on a version from before names, writes its copy without one: the name stays
+        await theirs(list.id, [milk])
+        await sync.pass()
+        #expect(list.note.title == "Groceries")
+        #expect(try mine(list.id).name == "Groceries")
+
+        // Renamed on the other device later: it shows here, and this Mac's copy says so too
+        await theirs(list.id, [milk], name: "Shopping", named: named.addingTimeInterval(60))
+        await sync.pass()
+        #expect(list.note.name == "Shopping")
+        #expect(list.note.items.map(\.text) == ["Milk"])
+        #expect(try mine(list.id).name == "Shopping")
+
+        // Its name taken off there: it's named after its first task again
+        await theirs(list.id, [milk], name: nil, named: named.addingTimeInterval(120))
+        await sync.pass()
+        #expect(list.note.name == nil)
+        #expect(list.note.title == "Milk")
+    }
+
+    @Test func aListSentHereComesWithItsName() async throws {
+        defer { cleanUp() }
+        let id = UUID()
+        await theirs(id, [ToDo(text: "Milk", changed: earlier)], name: "Groceries", named: earlier)
+        let host = Host([])
+        let sync = try syncing(host)
+        await sync.pass()
+        let page = try #require(host.notePages.first)
+        #expect(page.note.title == "Groceries")
+        #expect(page.sync?.nameChanged == earlier)
+    }
+
+    @Test func aNamedListStartsSyncingWithItsName() async throws {
+        defer { cleanUp() }
+        let list = TodoList(items: [ToDo(text: "Milk")])
+        list.name = "Groceries"
+        let host = Host([list])
+        let sync = try syncing(host)
+        sync.start(list, in: folder, to: [air])
+        await sync.pass()
+        #expect(try mine(list.id).name == "Groceries")
+        #expect(try mine(list.id).nameChanged != nil)
+        #expect(list.note.name == "Groceries")
     }
 
     @Test func addsAListAnotherDeviceSendsHereAndKeepsItGoneOnceDeleted() async throws {
