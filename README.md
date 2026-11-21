@@ -44,7 +44,7 @@ Only to-do lists sync, not notes. Any folder that syncs between your Macs works,
 
 ## YANA for iPhone
 
-YANA for iPhone shows and edits your synced to-do lists. Add the sync folder in it (**Add Sync Folder…**, then pick the folder in iCloud Drive), then on the Mac open the list's **Sync Settings for This List…** and tick the iPhone. Check tasks off, change them, press Return in one to start a new one below it, drag them into order, and clear the checked ones. Name a list with **Rename…** in its **…** menu, or touch and hold it in your lists. A list started on the iPhone goes to your Macs with **Sync This List…**. It syncs while it's open, and catches up when you open it.
+YANA for iPhone shows and edits your synced to-do lists. Add the sync folder in it (**Add Sync Folder…**, then pick the folder in iCloud Drive), then on the Mac open the list's **Sync Settings for This List…** and tick the iPhone. Check tasks off, change them, press Return in one to start a new one below it, touch and hold one to drag it into order, and clear the checked ones. Name a list with **Rename…** in its **…** menu, or touch and hold it in your lists. A list started on the iPhone goes to your Macs with **Sync This List…**. It syncs while it's open, and catches up when you open it.
 
 It's installed through TestFlight. Setting that up, once, is in [docs/iphone.md](docs/iphone.md).
 

@@ -1,7 +1,7 @@
 # YANA for iPhone
 
 YANA for iPhone shows and edits the to-do lists YANA syncs, through the same sync folder your Macs use. Check tasks
-off, change them, add them (Return in a task starts a new one below, as on the Mac), drag them into order, and clear
+off, change them, add them (Return in a task starts a new one below, as on the Mac), touch and hold one to drag it into order, and clear
 the checked ones. A list your Mac sends to the iPhone shows up on its own, and a list started on the iPhone can be
 sent to your Macs with **Sync This List…**. Notes stay on the Mac: only lists come to the iPhone.
 

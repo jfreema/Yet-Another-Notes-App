@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// A list's tasks, numbered like on the Mac. Tap a circle to check a task off, tap its text to change it, and press
-/// Return in a task to start a new one below it. Swipe a task to delete it; Edit drags them into a new order. Rename…
-/// in the … menu names the list.
+/// Return in a task to start a new one below it. Touch and hold a task to drag it into a new order (or use Edit), and
+/// swipe one to delete it. Rename… in the … menu names the list.
 struct ListView: View {
     let listID: UUID
     @Environment(AppModel.self) private var model
@@ -15,6 +15,9 @@ struct ListView: View {
     @State private var confirmingDelete = false
     @State private var renaming: Note?
     @State private var newName = ""
+    /// The task showing a text field to type in. The others show plain text, so touching and holding one drags it
+    /// instead of selecting its text.
+    @State private var editing: UUID?
 
     enum Field: Hashable {
         case task(UUID)
@@ -30,9 +33,21 @@ struct ListView: View {
                                        description: Text("This list no longer comes to this iPhone."))
             }
         }
-        .onChange(of: focus) { old, _ in
+        .onChange(of: focus) { old, new in
             // A task left empty goes away, as on the Mac
             if case .task(let id)? = old { model.removeBlank(id, in: listID) }
+            switch new {
+            case .task(let id)?:
+                editing = id
+            case .add?:
+                editing = nil
+            case nil:
+                // Back to plain text once the keyboard has really gone, not while focus moves to another task
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    if focus == nil { editing = nil }
+                }
+            }
         }
         .onDisappear {
             model.closed(listID)
@@ -44,8 +59,11 @@ struct ListView: View {
         let checked = list.checkedCount
         return List {
             ForEach(Array(list.items.enumerated()), id: \.element.id) { index, item in
-                TaskRow(number: index + 1, item: item, look: look, text: text(of: item.id), focus: $focus) {
+                TaskRow(number: index + 1, item: item, look: look, text: text(of: item.id), focus: $focus,
+                        typing: editing == item.id || focus == .task(item.id)) {
                     model.toggle(item.id, in: listID)
+                } edit: {
+                    go(to: .task(item.id))
                 }
                 .listRowBackground(look.background)
             }
@@ -169,11 +187,14 @@ struct ListView: View {
             case .task(let id): next = .task(id)
             case .add: next = .add
             }
-            // Once the task it goes to is on screen
-            if let next {
-                Task { @MainActor in focus = next }
-            }
+            if let next { go(to: next) }
         }
+    }
+
+    /// Puts the keyboard in a task or the add row, once its text field is on screen
+    private func go(to next: Field) {
+        if case .task(let id) = next { editing = id }
+        Task { @MainActor in focus = next }
     }
 
     private func addTask() {
@@ -189,14 +210,18 @@ struct ListView: View {
     }
 }
 
-/// A task: its number, the circle that checks it off, and its text
+/// A task: its number, the circle that checks it off, and its text. The text is a text field only while you're typing
+/// in it (`typing`); otherwise it's plain text that `edit` turns into one when tapped, so that touching and holding
+/// the task drags it into a new order rather than selecting its text.
 struct TaskRow: View {
     let number: Int
     let item: ToDo
     let look: Look
     @Binding var text: String
     var focus: FocusState<ListView.Field?>.Binding
+    let typing: Bool
     let toggle: () -> Void
+    let edit: () -> Void
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -212,11 +237,23 @@ struct TaskRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(item.done ? "Checked" : "Not checked")
-            TextField("Task", text: $text, axis: .vertical)
-                .font(look.font)
-                .foregroundStyle(item.done ? look.doneColor : look.textColor)
-                .strikethrough(item.done, color: look.doneColor)
-                .focused(focus, equals: .task(item.id))
+            if typing {
+                TextField("Task", text: $text, axis: .vertical)
+                    .font(look.font)
+                    .foregroundStyle(item.done ? look.doneColor : look.textColor)
+                    .strikethrough(item.done, color: look.doneColor)
+                    .focused(focus, equals: .task(item.id))
+            } else {
+                Text(item.text.isEmpty ? "Task" : item.text)
+                    .font(look.font)
+                    .foregroundStyle(item.done || item.text.isEmpty ? look.doneColor : look.textColor)
+                    .strikethrough(item.done && !item.text.isEmpty, color: look.doneColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: edit)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Edits the task")
+            }
         }
     }
 }
