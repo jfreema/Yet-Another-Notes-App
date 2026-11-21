@@ -7,9 +7,10 @@ import Carbon.HIToolbox
 final class HotKey {
     /// The keys, as menus write them
     static let title = "⌃⌥N"
-    /// The N key, by where it is on the keyboard
-    static let keyCode = UInt32(kVK_ANSI_N)
-    static let modifiers = UInt32(controlKey | optionKey)
+    /// The N key, by where it is on the keyboard. `nonisolated`, as `modifiers` is, so `init` can take them when it
+    /// isn't given others.
+    nonisolated static let keyCode = UInt32(kVK_ANSI_N)
+    nonisolated static let modifiers = UInt32(controlKey | optionKey)
 
     /// What pressing the keys does
     var action: () -> Void = {}
