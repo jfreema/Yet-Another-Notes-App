@@ -222,6 +222,10 @@ setup and user guide.
   brings down late isn't taken for a new device.
 - **The sample lists don't sync** (`AppModel.isSample`). Their folder is a real one in the temporary directory, with
   a Mac's card and two of its lists, so the screens that read a folder have something to show.
+- **The UI tests are tried up to three times** (`-retry-tests-on-failure`), since a tap or a drag on the hosted
+  simulator sometimes misses: three of four runs on 2026-11-21 failed, each on a different UI test that passed the
+  next time. The workflow says which tests needed another try, and shows where a failing one failed and what was on
+  screen.
 - **Release**: the iPhone workflow tests on the simulator, archives unsigned, and on main exports with cloud signing
   and uploads to TestFlight, using the App Store Connect API key in `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY`. The
   build number is the run number. The version is `CFBundleShortVersionString` in `iOS/Info.plist`.

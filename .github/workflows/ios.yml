@@ -51,7 +51,7 @@ jobs:
           xcodegen generate
 
       - name: Test on the iPhone simulator
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           # The newest iOS simulator with an iPhone
           udid="$(xcrun simctl list devices available --json | python3 -c '
@@ -67,8 +67,18 @@ jobs:
           print(best[1])
           print(best[2], "on iOS", ".".join(map(str, best[0])), file=sys.stderr)
           ')"
+          # A test that fails is tried twice more, since a tap or a drag on the hosted simulator sometimes misses.
+          # One that fails all three times fails the run.
           xcodebuild test -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
-            -parallel-testing-enabled NO 2>&1 | tee "$RUNNER_TEMP/test.log" | xcbeautify --renderer github-actions
+            -parallel-testing-enabled NO -retry-tests-on-failure -test-iterations 3 2>&1 \
+            | tee "$RUNNER_TEMP/test.log" | xcbeautify --renderer github-actions
+
+      - name: Say which tests needed another try
+        if: always()
+        run: |
+          [[ -f "$RUNNER_TEMP/test.log" ]] || exit 0
+          grep -E "^Test Case .* failed \(" "$RUNNER_TEMP/test.log" | sed -E 's/ \([0-9.]+ seconds\)\.//' | sort | uniq -c \
+            || echo "Every test passed the first time"
 
       - name: Show what failed, and the end of the test log
         if: failure()
