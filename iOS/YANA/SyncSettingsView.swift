@@ -48,11 +48,9 @@ struct SyncSettingsView: View {
                 await watchDevices()
             }
             .fileImporter(isPresented: $addingFolder, allowedContentTypes: [.folder]) { result in
-                let before = Set(model.folders.map(\.id))
-                problem = model.addFolder(from: result)
-                if let added = model.folders.first(where: { !before.contains($0.id) }) {
-                    folderID = added.id
-                }
+                let added = model.addFolder(from: result)
+                problem = added.problem
+                if let folder = added.folder { folderID = folder.id }
             }
             .alert("Couldn't use that folder", isPresented: hasProblem) {
                 Button("OK") {}
@@ -115,7 +113,10 @@ struct SyncSettingsView: View {
                 }
             }
             if let folderID, model.unreadable.contains(folderID) {
-                Text("YANA can't open this folder, so nothing syncs through it. In Settings here, remove it and add it again.")
+                // With when the list last synced, if it's one that syncs through the folder
+                Text((model.list(listID).flatMap { $0.sync?.folder == folderID ? model.syncProblem(of: $0) : nil }
+                      ?? "YANA can't open this folder, so nothing syncs through it.")
+                     + " In Settings here, remove the folder and add it again.")
                     .font(.footnote)
                     .foregroundStyle(.red)
             } else if loaded && others.isEmpty && folderID != nil {

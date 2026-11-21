@@ -60,6 +60,21 @@ final class ListUITests: XCTestCase {
         XCTAssertEqual(now.first, "Eggs", "\(now)\n\(app.debugDescription)")
     }
 
+    func testUndoPutsASwipedTaskBack() {
+        row("Lemons").swipeLeft()
+        // A short swipe shows Delete, and a long one deletes
+        let delete = app.buttons["Delete"]
+        if delete.waitForExistence(timeout: 2) { delete.tap() }
+        let undo = app.buttons["Undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(task("Lemons").exists)
+        undo.tap()
+        XCTAssertTrue(task("Lemons").waitForExistence(timeout: 5), app.debugDescription)
+        sleep(1)
+        XCTAssertEqual(order(groceries), groceries)
+        XCTAssertFalse(undo.exists)
+    }
+
     func testTappingATaskTypesInIt() {
         let add = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", "Add a task")).firstMatch
         XCTAssertTrue(add.waitForExistence(timeout: 5), app.debugDescription)

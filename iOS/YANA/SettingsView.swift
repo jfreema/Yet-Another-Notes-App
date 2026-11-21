@@ -1,7 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// This iPhone's name, the sync folders it uses, and how lists look
+/// This iPhone's name, the sync folders it uses, and how lists look. Tapping a folder shows the lists in it that
+/// aren't on this iPhone, to bring them here, and so does adding one.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -10,9 +11,11 @@ struct SettingsView: View {
     @State private var addingFolder = false
     @State private var removing: PhoneFolder?
     @State private var problem: String?
+    /// The folder whose lists are showing, by id
+    @State private var path: [String] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Form {
                 Section {
                     TextField("Name", text: $name)
@@ -26,18 +29,20 @@ struct SettingsView: View {
 
                 Section {
                     ForEach(model.folders) { folder in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(folder.name)
-                            Group {
-                                if model.unreadable.contains(folder.id) {
-                                    Text("YANA can't open this folder. Remove it and add it again.")
-                                        .foregroundStyle(.red)
-                                } else {
-                                    Text(listCount(in: folder))
-                                        .foregroundStyle(.secondary)
+                        NavigationLink(value: folder.id) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(folder.name)
+                                Group {
+                                    if model.unreadable.contains(folder.id) {
+                                        Text("YANA can't open this folder. Remove it and add it again.")
+                                            .foregroundStyle(.red)
+                                    } else {
+                                        Text(listCount(in: folder))
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                .font(.caption)
                             }
-                            .font(.caption)
                         }
                     }
                     .onDelete { offsets in
@@ -47,7 +52,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Sync Folders")
                 } footer: {
-                    Text("Add the folder YANA on your Mac syncs through, like YANA Sync in iCloud Drive or a folder shared with you. Then, on the Mac, open the list's Sync Settings and tick this iPhone.")
+                    Text("Add the folder YANA on your Mac syncs through, like YANA Sync in iCloud Drive or a folder shared with you. YANA then shows the lists in it, to bring them here. Tap a folder to see them again.")
                 }
 
                 Section {
@@ -62,6 +67,11 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: String.self) { id in
+                if let folder = model.folders.first(where: { $0.id == id }) {
+                    FolderListsView(folder: folder)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -71,7 +81,15 @@ struct SettingsView: View {
                 }
             }
             .fileImporter(isPresented: $addingFolder, allowedContentTypes: [.folder]) { result in
-                problem = model.addFolder(from: result)
+                let added = model.addFolder(from: result)
+                problem = added.problem
+                // The lists already in it, to bring here, once the folder picker is out of the way
+                if let folder = added.folder {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(600))
+                        if path.isEmpty { path = [folder.id] }
+                    }
+                }
             }
             .alert("Couldn't use that folder", isPresented: hasProblem) {
                 Button("OK") {}

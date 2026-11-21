@@ -1,0 +1,114 @@
+name: iPhone screens (temporary)
+
+# TEMPORARY, on this branch only: compiles YANA for iPhone and its tests, runs the unit tests, takes simulator
+# screenshots of the new screens with the sample lists, and commits the pictures back to the branch. Not for main.
+
+on:
+  push:
+    branches: [claude/project-thread-7c1x2i]
+    paths: [iOS/**, .github/workflows/iphone-screens.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: iphone-screens
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  screens:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the app and its tests for the simulator
+        timeout-minutes: 20
+        run: |
+          brew install xcodegen
+          (cd iOS && xcodegen generate)
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          best = None
+          for runtime, devices in json.load(sys.stdin)["devices"].items():
+              if ".iOS-" not in runtime:
+                  continue
+              version = tuple(int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-"))
+              for device in devices:
+                  if device["name"].startswith("iPhone") and (best is None or version > best[0]):
+                      best = (version, device["udid"], device["name"])
+          print(best[1])
+          print(best[2], "on iOS", ".".join(map(str, best[0])), file=sys.stderr)
+          ')"
+          echo "UDID=$udid" >> "$GITHUB_ENV"
+          if ! xcodebuild build-for-testing -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
+            -derivedDataPath build > build.log 2>&1; then
+            grep -n -E "error:|warning: unre" -A6 build.log | head -300
+            tail -n 30 build.log
+            exit 1
+          fi
+          grep -E "\.swift:[0-9]+:[0-9]+: warning:" build.log | sort -u | head -60 || true
+
+      - name: Unit tests
+        timeout-minutes: 10
+        run: |
+          set -o pipefail
+          xcodebuild test-without-building -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$UDID" \
+            -derivedDataPath build -only-testing:YANATests -parallel-testing-enabled NO 2>&1 \
+            | tee test.log | grep -E "^(✔|✘|◇ Test run|Test Suite|\*\*|.*error:|.*recorded an issue|.*Expectation failed)" \
+            | grep -v "^◇ Test .* started" | tail -n 150
+
+      - name: Show the end of the test log
+        if: failure()
+        run: tail -n 120 test.log || true
+
+      - name: Take the screenshots
+        if: always()
+        timeout-minutes: 12
+        run: |
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
+            --cellularBars 4 --wifiBars 3 || true
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/YANA.app
+          rm -rf screens && mkdir -p screens
+          shot() {
+            local name="$1"; shift
+            xcrun simctl terminate "$UDID" io.github.jfreema.yana.ios 2>/dev/null || true
+            xcrun simctl launch "$UDID" io.github.jfreema.yana.ios -YANAScreenshots YES "$@"
+            sleep 9
+            xcrun simctl io "$UDID" screenshot "screens/$name.png"
+          }
+          xcrun simctl ui "$UDID" appearance light
+          shot 1-lists-not-syncing -YANAStopped YES
+          shot 2-list-not-syncing -YANAOpen 1 -YANAStopped YES
+          shot 3-undo -YANAOpen 1 -YANAShow undo
+          shot 4-recently-deleted -YANAShow deleted
+          shot 5-bring-lists-here -YANAShow folder
+          shot 6-new-device -YANAShow offer
+          shot 7-settings -YANAShow settings
+          shot 8-sticky-undo -YANAOpen 1 -sticky YES -YANAShow undo
+          shot 9-lists
+          xcrun simctl ui "$UDID" appearance dark
+          shot 10-dark-undo -YANAOpen 1 -YANAShow undo
+          shot 11-dark-bring-lists-here -YANAShow folder
+          # Small enough to look at
+          sips -Z 1300 screens/*.png > /dev/null
+          ls -la screens
+
+      - name: Commit the pictures
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add screens || exit 0
+          git commit -m "Temporary: iPhone screens" || exit 0
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin HEAD:"$GITHUB_REF_NAME"

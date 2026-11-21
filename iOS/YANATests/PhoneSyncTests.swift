@@ -34,6 +34,17 @@ struct PhoneSyncTests {
         try JSONDecoder().decode(SyncedList.self, from: Data(contentsOf: folder.copy(of: list, by: model.device)))
     }
 
+    /// A device's card in a folder, the way YANA on it writes one when it starts using the folder
+    func writeCard(_ card: DeviceCard, in folder: OpenFolder? = nil) throws {
+        let file = (folder ?? self.folder).card(of: card.id)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(card).write(to: file)
+    }
+
+    func texts(_ list: UUID) -> [String] {
+        model.list(list)?.items.map(\.text) ?? []
+    }
+
     /// A list the Mac sends to this iPhone: Milk, and Eggs checked off
     func sentFromMac() async throws -> (list: UUID, milk: UUID, eggs: UUID) {
         let list = UUID()
@@ -203,6 +214,252 @@ struct PhoneSyncTests {
         let again = AppModel(storage: root.appendingPathComponent("Lists.json"),
                              defaults: try #require(UserDefaults(suiteName: "YANATests-" + UUID().uuidString)))
         #expect(again.list(sent.list)?.items.map(\.text) == ["Milk", "Eggs"])
+    }
+
+    // MARK: Recently Deleted, and Undo
+
+    @Test func aDeletedListStaysInRecentlyDeletedAndCanBePutBack() async throws {
+        let sent = try await sentFromMac()
+        model.renameList(sent.list, to: "Groceries")
+        model.delete(sent.list)
+        #expect(model.lists.isEmpty)
+        let deleted = try #require(model.recentlyDeleted.first)
+        #expect(deleted.note.title == "Groceries")
+        #expect(deleted.note.items.map(\.text) == ["Milk", "Eggs"])
+        // Kept as it was here, but it won't sync when it's back
+        #expect(deleted.note.sync == nil)
+
+        // It's still there the next time YANA opens
+        let again = AppModel(storage: root.appendingPathComponent("Lists.json"),
+                             defaults: try #require(UserDefaults(suiteName: "YANATests-" + UUID().uuidString)))
+        #expect(again.recentlyDeleted.map { $0.note.title } == ["Groceries"])
+
+        // Put back, it's a list again with everything in it, and no longer in Recently Deleted
+        let back = try #require(model.putBack(deleted.id))
+        #expect(back != sent.list)
+        #expect(model.lists.map(\.id) == [back])
+        #expect(model.list(back)?.title == "Groceries")
+        #expect(model.list(back)?.items.map(\.done) == [false, true])
+        #expect(model.list(back)?.sync == nil)
+        #expect(model.recentlyDeleted.isEmpty)
+        // It can't be put back twice
+        #expect(model.putBack(deleted.id) == nil)
+
+        // Deleted again, it can be deleted for good
+        model.delete(back)
+        #expect(model.recentlyDeleted.count == 1)
+        model.emptyRecentlyDeleted()
+        #expect(model.recentlyDeleted.isEmpty)
+    }
+
+    @Test func aListWithNothingInItIsntKept() {
+        let id = model.newList()
+        model.delete(id)
+        #expect(model.lists.isEmpty)
+        #expect(model.recentlyDeleted.isEmpty)
+    }
+
+    @Test func deletedListsAreKeptFor30Days() {
+        let now = Date()
+        func deleted(_ name: String, daysAgo: Double) -> DeletedList {
+            DeletedList(note: Note(kind: .list, items: [ToDo(text: name)]),
+                        deleted: now.addingTimeInterval(-daysAgo * 24 * 60 * 60))
+        }
+        let kept = AppModel.kept([deleted("Old", daysAgo: 31), deleted("Week", daysAgo: 7), deleted("Today", daysAgo: 0)],
+                                 now: now)
+        #expect(kept.map { $0.note.title } == ["Today", "Week"])
+        // And only so many of them, the latest ones
+        let many = (0..<60).map { deleted("List \($0)", daysAgo: Double($0) / 10) }
+        let most = AppModel.kept(many, now: now)
+        #expect(most.count == AppModel.deletedLimit)
+        #expect(most.first?.note.title == "List 0")
+    }
+
+    @Test func aListTheMacTakesOffThisIPhoneGoesToRecentlyDeleted() async throws {
+        let sent = try await sentFromMac()
+        try writeMacCopy(of: sent.list, SyncedList(device: mac, items: [ToDo(id: sent.milk, text: "Milk", changed: earlier)],
+                                                   orderChanged: earlier, devices: [mac], devicesChanged: Date()))
+        await model.sync.flush()
+        #expect(model.list(sent.list) == nil)
+        // As it was here
+        #expect(model.recentlyDeleted.first?.note.items.map(\.text) == ["Milk", "Eggs"])
+    }
+
+    @Test func undoPutsADeletedTaskBackHereAndOnTheMac() async throws {
+        let sent = try await sentFromMac()
+        model.deleteTasks(at: [1], in: sent.list)
+        #expect(texts(sent.list) == ["Milk"])
+        #expect(model.undo(for: sent.list)?.summary == "Deleted “Eggs”")
+        await model.sync.flush()
+        let gone = try #require(try myCopy(of: sent.list).deleted[sent.eggs.uuidString])
+
+        // The Mac hears of the deletion, and deletes it too
+        try writeMacCopy(of: sent.list, SyncedList(device: mac, items: [ToDo(id: sent.milk, text: "Milk", changed: earlier)],
+                                                   orderChanged: gone, devices: [mac, model.device],
+                                                   devicesChanged: earlier, deleted: [sent.eggs.uuidString: gone]))
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk"])
+
+        // Undo puts it back as it was, checked off, and it's later than the deletion, so it wins on the Mac too
+        model.undoDelete()
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+        #expect(model.list(sent.list)?.items[1].done == true)
+        #expect(model.undo(for: sent.list) == nil)
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+        let mine = try myCopy(of: sent.list)
+        #expect(mine.items.map(\.text) == ["Milk", "Eggs"])
+        #expect((mine.items[1].changed ?? .distantPast) > gone)
+    }
+
+    @Test func undoPutsClearedTasksBackWhereTheyWere() throws {
+        let id = model.newList()
+        model.add("A\nB\nC\nD", to: id)
+        let items = try #require(model.list(id)?.items)
+        model.toggle(items[0].id, in: id)
+        model.toggle(items[2].id, in: id)
+        model.clearChecked(in: id)
+        #expect(texts(id) == ["B", "D"])
+        #expect(model.undo(for: id)?.summary == "Deleted 2 tasks")
+        model.undoDelete()
+        #expect(texts(id) == ["A", "B", "C", "D"])
+        #expect(model.list(id)?.items.map(\.done) == [true, false, true, false])
+
+        // Undo is for the latest deletion, until its few seconds are up
+        model.deleteTasks(at: [0], in: id)
+        let at = try #require(model.undo(for: id)?.at)
+        model.forgetUndo(at: at.addingTimeInterval(-5))
+        #expect(model.undo(for: id) != nil)
+        model.forgetUndo(at: at)
+        #expect(model.undo(for: id) == nil)
+        model.undoDelete()
+        #expect(texts(id) == ["B", "C", "D"])
+    }
+
+    // MARK: Setting up sync, and seeing when it stops
+
+    @Test func showsTheListsInAFolderAndBringsOneHere() async throws {
+        // A list on the Mac that doesn't come to this iPhone
+        let list = UUID()
+        try writeMacCopy(of: list, SyncedList(device: mac, items: [ToDo(text: "Tent", changed: earlier),
+                                                                    ToDo(text: "Stove", changed: earlier)],
+                                              orderChanged: earlier, devices: [mac], devicesChanged: earlier,
+                                              name: "Camping", nameChanged: earlier))
+        try writeCard(DeviceCard(id: mac, name: "MacBook Air", seen: earlier))
+        await model.sync.flush()
+        #expect(model.lists.isEmpty)
+        let lists = await model.sync.lists(in: folder)
+        #expect(lists.map(\.title) == ["Camping"])
+        #expect(lists.first?.detail == "2 tasks, on MacBook Air")
+
+        await model.sync.join([list], in: folder)
+        let here = try #require(model.list(list))
+        #expect(here.title == "Camping")
+        #expect(here.items.map(\.text) == ["Tent", "Stove"])
+        // This iPhone's copy says the list comes here now, later than the Mac's last word on where it goes
+        let mine = try myCopy(of: list)
+        #expect(mine.devices == [mac, model.device])
+        #expect(mine.devicesChanged > earlier)
+        #expect(mine.items.map(\.text) == ["Tent", "Stove"])
+        // It isn't offered again, and it stays
+        let after = await model.sync.lists(in: folder)
+        #expect(after.isEmpty)
+        await model.sync.flush()
+        #expect(model.list(list) != nil)
+    }
+
+    @Test func aListDeletedHereCanBeBroughtBackFromItsFolder() async throws {
+        let sent = try await sentFromMac()
+        model.delete(sent.list)
+        await model.sync.flush()
+        await model.sync.flush()
+        #expect(model.list(sent.list) == nil)
+        let lists = await model.sync.lists(in: folder)
+        #expect(lists.map(\.id) == [sent.list])
+
+        await model.sync.join([sent.list], in: folder)
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+        #expect(try myCopy(of: sent.list).devices.contains(model.device))
+    }
+
+    @Test func saysWhenItsFolderCantBeOpenedAndWhenItLastSynced() async throws {
+        let sent = try await sentFromMac()
+        let list = try #require(model.list(sent.list))
+        #expect(model.syncProblem(of: list) == nil)
+
+        // The folder goes away, as when it's deleted in Files or stops being shared
+        let place = folder.url
+        try FileManager.default.removeItem(at: place)
+        await model.sync.flush()
+        #expect(model.unreadable == [folder.id])
+        let problem = try #require(model.syncProblem(of: list))
+        #expect(problem.hasPrefix("YANA can't open its sync folder, “YANA Sync”, so it isn't syncing. It last synced "))
+        // A list that doesn't sync has nothing to say
+        let own = model.newList()
+        model.add("Bread", to: own)
+        let mine = try #require(model.list(own))
+        #expect(model.syncProblem(of: mine) == nil)
+
+        // Back again, it syncs again
+        try FileManager.default.createDirectory(at: place, withIntermediateDirectories: true)
+        await model.sync.flush()
+        #expect(model.unreadable.isEmpty)
+        #expect(model.syncProblem(of: list) == nil)
+    }
+
+    @Test func offersADeviceThatStartsUsingTheFolderTheListsThatSyncThere() async throws {
+        model.sync.devicesLookedEvery = 0
+        try writeCard(DeviceCard(id: mac, name: "MacBook Air", seen: earlier))
+        let sent = try await sentFromMac()
+        // The list already goes to the Mac, so there's nothing to offer it
+        #expect(model.offers.isEmpty)
+
+        // Another Mac adds the folder
+        let mini = UUID().uuidString
+        try writeCard(DeviceCard(id: mini, name: "Mac mini", seen: Date()))
+        await model.sync.flush()
+        #expect(model.offers.map(\.device.name) == ["Mac mini"])
+        #expect(model.lists(notGoingTo: mini, in: folder.id).map(\.id) == [sent.list])
+        // Only once
+        await model.sync.flush()
+        #expect(model.offers.count == 1)
+
+        // Sending it the list adds it to the list's devices, which this iPhone's copy then says
+        let offer = try #require(model.offers.first)
+        model.answered(offer, sending: [sent.list])
+        #expect(model.offers.isEmpty)
+        #expect(model.list(sent.list)?.sync?.devices == [model.device, mac, mini])
+        await model.sync.flush()
+        #expect(try myCopy(of: sent.list).devices == [model.device, mac, mini])
+        #expect(model.offers.isEmpty)
+    }
+
+    @Test func aDeviceAlreadyInAFolderWhenItsAddedIsntNew() async throws {
+        model.sync.devicesLookedEvery = 0
+        // A second folder, where a Mac's card is listed but iCloud Drive hasn't downloaded it yet
+        let url = root.appendingPathComponent("Shared", isDirectory: true)
+        let devices = url.appendingPathComponent("devices", isDirectory: true)
+        try FileManager.default.createDirectory(at: devices, withIntermediateDirectories: true)
+        try Data().write(to: devices.appendingPathComponent(".\(mac).json.icloud"))
+        let added = try model.addFolder(url)
+        let shared = try #require(model.openFolder(added.id))
+        let id = model.newList()
+        model.add("Bread", to: id)
+        model.startSyncing(id, in: added.id, to: [])
+        await model.sync.flush()
+
+        // Its card comes down: it was there all along
+        try FileManager.default.removeItem(at: devices.appendingPathComponent(".\(mac).json.icloud"))
+        try writeCard(DeviceCard(id: mac, name: "MacBook Air", seen: earlier), in: shared)
+        await model.sync.flush()
+        #expect(model.offers.isEmpty)
+
+        // One that turns up later is new
+        try writeCard(DeviceCard(id: UUID().uuidString, name: "Mac mini", seen: Date()), in: shared)
+        await model.sync.flush()
+        #expect(model.offers.map(\.device.name) == ["Mac mini"])
     }
 }
 
