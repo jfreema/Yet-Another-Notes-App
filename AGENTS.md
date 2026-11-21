@@ -155,12 +155,12 @@ setup and user guide.
 | Area | Files |
 |---|---|
 | Launch, and syncing as YANA comes and goes | `YANAApp`, `AppModel.became` |
-| The lists, the folders, this iPhone's id and name, saving to `Lists.json` | `AppModel` |
+| The lists, the folders, this iPhone's id and name, saving to `Lists.json`, Recently Deleted, Undo for deleted tasks, whether a list is syncing, and a new device to offer lists to | `AppModel` |
 | Editing a list: Return in a task, empty tasks, change times | `Note+Phone` |
-| Syncing: the same passes as `ListSync` on the Mac | `PhoneSync` |
+| Syncing: the same passes as `ListSync` on the Mac, a folder's lists to bring here, and joining them | `PhoneSync` |
 | Reading and writing the folders, iCloud Drive downloads | `PhoneFiles` |
 | A sync folder: its bookmark, and its paths | `Folders` |
-| The screens | `ListsView`, `ListView`, `SyncSettingsView`, `SettingsView`, `Look` |
+| The screens | `ListsView`, `ListView`, `SyncSettingsView`, `SettingsView`, `FolderListsView`, `DeletedListsView`, `Look` |
 
 - **It compiles `Sources/YANA/Note.swift` and `Sources/YANA/SyncFormat.swift`** from the Mac app, so both apps write
   and merge the same files. Keep those two files to Foundation. A change to them runs the iPhone workflow, which runs
@@ -176,6 +176,22 @@ setup and user guide.
 - **Starting to sync gives the list a new id**, as on the Mac. `AppModel` remembers the old id, so the list's screen
   keeps showing it.
 - **It syncs only while open**: every 3 seconds, soon after a change, and once more as it goes to the background.
+- **Undo is one deletion deep.** `AppModel.undoable` holds the tasks last swiped away or cleared, with their places,
+  and `ListView` shows the Undo bar for six seconds. Putting them back is an ordinary change, so in a synced list
+  they're stamped later than their deletion and come back on the other devices too.
+- **Recently Deleted is in `Lists.json`** (`Saved.deleted`, optional so older builds read the file). It gets a list
+  deleted here and one another device took off this iPhone, as it was here and without its syncing, for 30 days, 50
+  at most. Putting one back gives it a new id, as on the Mac.
+- **Adding a folder shows its lists** (`FolderListsView`, from `PhoneSync.lists(in:)`), and `join` brings the ones
+  switched on here the way the Mac's `ListSync.join` does. It reads the folder every few seconds while it's showing,
+  since iCloud Drive may still be downloading what's in it. Tapping a folder in Settings shows them again.
+- **A list says when it has stopped syncing** (`AppModel.syncProblem`): its folder's bookmark wouldn't open, or the
+  folder couldn't be listed on the last pass. When each folder was last read is in UserDefaults (`syncLastRead`).
+- **A device that starts using a folder is offered its lists** (`AppModel.noticed`, `DeviceOfferView`), as on the Mac.
+  The first look at a folder counts every device listed there, downloaded yet or not, so a card that iCloud Drive
+  brings down late isn't taken for a new device.
+- **The sample lists don't sync** (`AppModel.isSample`). Their folder is a real one in the temporary directory, with
+  a Mac's card and two of its lists, so the screens that read a folder have something to show.
 - **Release**: the iPhone workflow tests on the simulator, archives unsigned, and on main exports with cloud signing
   and uploads to TestFlight, using the App Store Connect API key in `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY`. The
   build number is the run number. The version is `CFBundleShortVersionString` in `iOS/Info.plist`.

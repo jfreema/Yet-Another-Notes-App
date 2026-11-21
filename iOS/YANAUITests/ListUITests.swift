@@ -1,6 +1,7 @@
 import XCTest
 
-/// Drags tasks into a new order and types in them, on the sample lists debug builds show with -YANAScreenshots.
+/// Drags tasks into a new order, types in them, and undoes deleting them, on the sample lists debug builds show with
+/// -YANAScreenshots.
 /// Groceries is Milk, Eggs, Coffee beans, Lemons, Sourdough.
 final class ListUITests: XCTestCase {
     var app: XCUIApplication!
@@ -58,6 +59,36 @@ final class ListUITests: XCTestCase {
         sleep(1)
         let now = order(groceries)
         XCTAssertEqual(now.first, "Eggs", "\(now)\n\(app.debugDescription)")
+    }
+
+    func testUndoPutsASwipedTaskBack() {
+        row("Lemons").swipeLeft()
+        // A short swipe shows Delete, and a long one deletes
+        let delete = app.buttons["Delete"]
+        if delete.waitForExistence(timeout: 2) { delete.tap() }
+        undoBrings("Lemons", backInto: groceries)
+    }
+
+    func testUndoPutsClearedTasksBack() {
+        app.buttons["Clear Checked (2)"].tap()
+        let clear = app.buttons["Clear Checked"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5), app.debugDescription)
+        clear.tap()
+        XCTAssertTrue(app.buttons["Undo"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(task("Sourdough").exists)
+        undoBrings("Eggs", backInto: groceries)
+    }
+
+    /// Taps Undo, and checks the task is back in its place and the Undo bar has gone
+    private func undoBrings(_ text: String, backInto all: [String]) {
+        let undo = app.buttons["Undo"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(task(text).exists)
+        undo.tap()
+        XCTAssertTrue(task(text).waitForExistence(timeout: 5), app.debugDescription)
+        sleep(1)
+        XCTAssertEqual(order(all), all)
+        XCTAssertFalse(undo.exists)
     }
 
     func testTappingATaskTypesInIt() {

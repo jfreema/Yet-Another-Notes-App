@@ -90,15 +90,25 @@ actor PhoneFiles {
 
     /// The devices that use a folder, newest first, read from its devices folder
     func devices(in folder: OpenFolder) -> [DeviceCard] {
+        devicesListed(in: folder).cards
+    }
+
+    /// The devices that use a folder: the cards that can be read now, newest first, and the id of every device listed
+    /// there, whether or not iCloud Drive has downloaded its card yet
+    func devicesListed(in folder: OpenFolder) -> (cards: [DeviceCard], ids: [String]) {
         var cards: [DeviceCard] = []
+        var ids: [String] = []
         for listed in Self.contents(of: folder.devicesFolder) ?? [] {
-            guard let found = Self.jsonFile(listed), found.onPhone, Self.isDownloaded(found.file),
+            guard let found = Self.jsonFile(listed) else { continue }
+            let id = found.file.deletingPathExtension().lastPathComponent
+            if !ids.contains(id) { ids.append(id) }
+            guard found.onPhone, Self.isDownloaded(found.file),
                   let data = Self.coordinatedRead(found.file),
                   let card = try? JSONDecoder().decode(DeviceCard.self, from: data),
                   !cards.contains(where: { $0.id == card.id }) else { continue }
             cards.append(card)
         }
-        return cards.sorted { $0.seen > $1.seen }
+        return (cards.sorted { $0.seen > $1.seen }, ids)
     }
 
     /// When a device last wrote its copy of a list, which it does whenever it has a change to pass on

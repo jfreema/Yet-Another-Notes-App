@@ -2,7 +2,8 @@ import SwiftUI
 
 /// A list's tasks, numbered like on the Mac. Tap a circle to check a task off, tap its text to change it, and press
 /// Return in a task to start a new one below it. Touch and hold a task to drag it into a new order (or use Edit), and
-/// swipe one to delete it. Rename… in the … menu names the list.
+/// swipe one to delete it, with Undo for a few seconds after. Rename… in the … menu names the list. A list that has
+/// stopped syncing says so at the top.
 struct ListView: View {
     let listID: UUID
     @Environment(AppModel.self) private var model
@@ -58,6 +59,18 @@ struct ListView: View {
         let look = Look(sticky: sticky)
         let checked = list.checkedCount
         return List {
+            if let problem = model.syncProblem(of: list) {
+                Label {
+                    Text(problem)
+                } icon: {
+                    Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                        .foregroundStyle(.orange)
+                }
+                .font(.footnote)
+                .foregroundStyle(look.doneColor)
+                .listRowBackground(look.background)
+            }
+
             ForEach(Array(list.items.enumerated()), id: \.element.id) { index, item in
                 TaskRow(number: index + 1, item: item, look: look, text: text(of: item.id), focus: $focus,
                         typing: editing == item.id || focus == .task(item.id)) {
@@ -116,6 +129,19 @@ struct ListView: View {
         .refreshable {
             await model.sync.flush()
         }
+        .safeAreaInset(edge: .bottom) {
+            // For a few seconds after tasks are deleted
+            if let undo = model.undo(for: listID) {
+                UndoBar(text: undo.summary) { model.undoDelete() }
+                    .task(id: undo.at) {
+                        // It stays for a screenshot of the sample lists
+                        guard !model.isSample else { return }
+                        try? await Task.sleep(for: .seconds(6))
+                        if !Task.isCancelled { model.forgetUndo(at: undo.at) }
+                    }
+            }
+        }
+        .animation(.default, value: model.undo(for: listID)?.at)
         .sheet(isPresented: $showingSync) {
             SyncSettingsView(listID: listID)
         }
@@ -131,13 +157,15 @@ struct ListView: View {
                 dismiss()
             }
         } message: {
-            Text(list.sync == nil ? "You can't undo this."
-                 : "It stays on your other devices, and stops coming to this iPhone.")
+            Text(list.deleteWarning)
         }
         .onAppear {
             // A new list starts with typing its first task
             if list.items.isEmpty && list.sync == nil { focus = .add }
             if ListsView.showAtLaunch == "sync" { showingSync = true }
+            if ListsView.showAtLaunch == "undo", model.undo(for: listID) == nil {
+                model.deleteTasks(at: [1], in: listID)
+            }
         }
     }
 
@@ -255,6 +283,34 @@ struct TaskRow: View {
                     .accessibilityHint("Edits the task")
             }
         }
+    }
+}
+
+/// Says what was just deleted, with a button that puts it back
+struct UndoBar: View {
+    let text: String
+    let undo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(text)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            // The whole right end of the bar takes the tap, not just the word
+            Button(action: undo) {
+                Text("Undo")
+                    .fontWeight(.semibold)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+            }
+        }
+        .font(.subheadline)
+        .padding(.leading, 16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }
 
