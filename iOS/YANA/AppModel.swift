@@ -57,6 +57,9 @@ final class AppModel {
     private(set) var undoable: DeletedTasks?
     /// Devices that have started using a folder, each waiting to be offered the lists that sync through it
     private(set) var offers: [DeviceOffer] = []
+    /// Counts the sync passes that read a folder. A screen that shows what's in a folder reads it again when this
+    /// changes, which is when there may be something new there.
+    private(set) var syncPasses = 0
 
     /// This iPhone's id in the sync folders
     let device: String
@@ -70,6 +73,8 @@ final class AppModel {
     /// Lists that got a new id when they started syncing, so a screen showing one keeps showing it
     @ObservationIgnored private var renamed: [UUID: UUID] = [:]
     @ObservationIgnored private var syncSoon: Task<Void, Never>?
+    /// Whether something typed hasn't been saved yet. Typing is saved after a pause, not a character at a time.
+    @ObservationIgnored private(set) var unsaved = false
     /// When each sync folder was last read, by id. It's what a list that has stopped syncing says it last synced.
     @ObservationIgnored private var lastSynced: [String: Date] = [:]
     @ObservationIgnored private var lastSyncedSaved = Date.distantPast
@@ -132,6 +137,7 @@ final class AppModel {
     }
 
     func save() {
+        unsaved = false
         let saved = Saved(lists: lists.map(\.syncable),
                           left: Dictionary(uniqueKeysWithValues: left.map { ($0.key.uuidString, $0.value) }),
                           deleted: recentlyDeleted.isEmpty ? nil : recentlyDeleted)
@@ -150,14 +156,21 @@ final class AppModel {
         defaults.set(try? JSONEncoder().encode(folders), forKey: Keys.folders)
     }
 
-    /// Saves, and syncs a moment later, after a change made here
-    private func changed() {
-        save()
+    /// Saves, and syncs a moment later, after a change made here. Typing is saved with that sync, once there's a
+    /// pause in it, so each character doesn't write every list out again. It's also saved by the next change of any
+    /// other kind, and as YANA goes to the background.
+    private func changed(typing: Bool = false) {
+        if typing {
+            unsaved = true
+        } else {
+            save()
+        }
         syncSoon?.cancel()
         syncSoon = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            self?.sync.run()
+            guard !Task.isCancelled, let self else { return }
+            if self.unsaved { self.save() }
+            self.sync.run()
         }
     }
 
@@ -194,15 +207,16 @@ final class AppModel {
         return note.id
     }
 
-    /// Changes a list, as it was changed here. A synced list gets the change times its other devices go by.
-    func change(_ id: UUID, _ body: (inout Note) -> Void) {
+    /// Changes a list, as it was changed here. A synced list gets the change times its other devices go by. `typing`
+    /// is for a change that's one of many in a row, like a character typed: it's saved once they pause.
+    func change(_ id: UUID, typing: Bool = false, _ body: (inout Note) -> Void) {
         guard let index = index(of: id) else { return }
         let old = lists[index]
         var new = old
         body(&new)
         guard new != old else { return }
         lists[index] = new.stamped(after: old, at: Date())
-        changed()
+        changed(typing: typing)
     }
 
     func toggle(_ task: UUID, in list: UUID) {
@@ -212,7 +226,9 @@ final class AppModel {
     /// Typing in a task. Gives back where typing goes next.
     func enter(_ text: String, in task: UUID, of list: UUID) -> NextFocus {
         var next = NextFocus.stay
-        change(list) { next = $0.enter(text, in: task) }
+        change(list, typing: true) { next = $0.enter(text, in: task) }
+        // Return made a task, or went on to adding one, which is saved like any other change
+        if next != .stay, unsaved { save() }
         return next
     }
 
@@ -357,19 +373,8 @@ final class AppModel {
     /// nothing left from an earlier time it synced mixes in.
     func startSyncing(_ id: UUID, in folder: String, to devices: [String]) {
         guard let index = index(of: id) else { return }
-        let now = Date()
-        var note = lists[index].syncable
-        let oldID = note.id
-        note.id = UUID()
-        note.items = note.items.map { item in
-            var item = item
-            item.changed = now
-            return item
-        }
-        // A name it already has goes with it
-        note.sync = SyncInfo(folder: folder, devices: [device] + devices, devicesChanged: now, orderChanged: now,
-                             deleted: [:], nameChanged: note.name == nil ? nil : now)
-        renamed[oldID] = note.id
+        let note = lists[index].startingToSync(in: folder, from: device, to: devices, at: Date())
+        renamed[lists[index].id] = note.id
         lists[index] = note
         changed()
     }
@@ -429,6 +434,7 @@ final class AppModel {
     func synced(unreadable: Set<String>, read: Set<String> = [], at now: Date = Date()) {
         if unreadable != self.unreadable { self.unreadable = unreadable }
         guard !read.isEmpty else { return }
+        syncPasses += 1
         for id in read { lastSynced[id] = now }
         // Kept for the next time YANA opens, about once a minute
         if now.timeIntervalSince(lastSyncedSaved) >= 60 {
@@ -461,16 +467,11 @@ final class AppModel {
     /// there before anything could be offered.
     func noticed(_ cards: [DeviceCard], listed: [String], in folder: String) {
         var known = (defaults.dictionary(forKey: Keys.knownDevices) as? [String: [String]]) ?? [:]
-        guard let before = known[folder] else {
-            known[folder] = Array(Set(listed + cards.map(\.id))).sorted()
-            defaults.set(known, forKey: Keys.knownDevices)
-            return
-        }
-        let new = cards.filter { $0.id != device && !before.contains($0.id) }
-        guard !new.isEmpty else { return }
-        known[folder] = before + new.map(\.id)
+        let look = SyncPass(device: device).noticed(cards, listed: listed, before: known[folder])
+        guard look.known != known[folder] else { return }
+        known[folder] = look.known
         defaults.set(known, forKey: Keys.knownDevices)
-        for card in new where !lists(notGoingTo: card.id, in: folder).isEmpty {
+        for card in look.new where !lists(notGoingTo: card.id, in: folder).isEmpty {
             let offer = DeviceOffer(device: card, folder: folder)
             if !offers.contains(where: { $0.id == offer.id }) { offers.append(offer) }
         }

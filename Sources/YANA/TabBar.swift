@@ -56,11 +56,12 @@ final class TabBar: NSView {
             button.tag = index
             button.title = note.title
             let problem = (index < sync.count ? sync[index] : nil)?.problem()
-            if let problem {
-                button.toolTip = "\(note.title): \(problem)"
+            button.problem = problem
+            button.synced = note.sync != nil
+            button.toolTip = Self.tip(for: button)
+            if problem != nil {
                 button.image = Self.stoppedImage
             } else {
-                button.toolTip = note.sync == nil ? note.title : "\(note.title) (synced)"
                 button.image = note.kind == .list ? (note.sync == nil ? Self.listImage : Self.syncedImage) : nil
             }
             button.imagePosition = note.kind == .list ? .imageLeading : .noImage
@@ -77,6 +78,26 @@ final class TabBar: NSView {
                 items[3].isHidden = notes.count == 1
             }
         }
+    }
+
+    /// The tabs' names, as they're showing
+    var titles: [String] {
+        stack.arrangedSubviews.compactMap { ($0 as? TabButton)?.title }
+    }
+
+    /// Shows a tab's name as it is now, after what's in the tab changed. Typing changes nothing else about the tabs,
+    /// so nothing else is looked at.
+    func retitle(_ index: Int, to title: String) {
+        let buttons = stack.arrangedSubviews.compactMap { $0 as? TabButton }
+        guard buttons.indices.contains(index), buttons[index].title != title else { return }
+        buttons[index].title = title
+        buttons[index].toolTip = Self.tip(for: buttons[index])
+    }
+
+    /// What a tab says when the mouse rests on it: its name, and that it syncs or why it doesn't
+    private static func tip(for button: TabButton) -> String {
+        if let problem = button.problem { return "\(button.title): \(problem)" }
+        return button.synced ? "\(button.title) (synced)" : button.title
     }
 
     /// A scope bar button: the selected tab stays pressed
@@ -129,6 +150,10 @@ final class TabBar: NSView {
 @MainActor
 final class TabButton: NSButton {
     var onDoubleClick: (() -> Void)?
+    /// Why its list isn't syncing, if it's a synced list that isn't
+    var problem: String?
+    /// Whether it's a synced list
+    var synced = false
 
     override func mouseDown(with event: NSEvent) {
         // The first click has already picked the tab

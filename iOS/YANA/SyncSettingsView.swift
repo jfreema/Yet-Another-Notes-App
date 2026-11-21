@@ -44,8 +44,12 @@ struct SyncSettingsView: View {
                         .disabled(folderID == nil)
                 }
             }
-            .task(id: folderID) {
-                await watchDevices()
+            // Again whenever a sync has read the folders, which it does when something in one changes
+            .task(id: Look(folder: folderID, pass: model.syncPasses)) {
+                await loadDevices()
+            }
+            .onChange(of: folderID) {
+                loaded = false
             }
             .fileImporter(isPresented: $addingFolder, allowedContentTypes: [.folder]) { result in
                 let added = model.addFolder(from: result)
@@ -146,27 +150,31 @@ struct SyncSettingsView: View {
         return "Last heard from \(min(date, Date()).formatted(.relative(presentation: .named)))"
     }
 
-    /// Reads the folder's devices now and every few seconds, so one that adds the folder meanwhile shows up
-    private func watchDevices() async {
-        loaded = false
-        while !Task.isCancelled {
-            guard let folderID, let folder = model.openFolder(folderID) else {
-                devices = []
-                loaded = true
-                return
-            }
-            let cards = await model.sync.files.devices(in: folder)
-            var heard: [String: Date] = [:]
-            if let current, current.folder == folderID, let list = model.list(listID) {
-                for device in current.devices where device != model.device {
-                    heard[device] = await model.sync.files.heard(from: device, list: list.id, in: folder)
-                }
-            }
-            devices = cards
-            self.heard = heard
+    /// Which folder's devices are shown, and as of which sync
+    private struct Look: Hashable {
+        var folder: String?
+        var pass: Int
+    }
+
+    /// Reads the folder's devices. It's read again after each sync that reads the folders, so a device that adds the
+    /// folder meanwhile shows up.
+    private func loadDevices() async {
+        guard let folderID, let folder = model.openFolder(folderID) else {
+            devices = []
             loaded = true
-            try? await Task.sleep(for: .seconds(3))
+            return
         }
+        let cards = await model.sync.devices(in: folder)
+        var heard: [String: Date] = [:]
+        if let current, current.folder == folderID, let list = model.list(listID) {
+            for device in current.devices where device != model.device {
+                heard[device] = await model.sync.files.heard(from: device, list: list.id, in: folder)
+            }
+        }
+        guard !Task.isCancelled else { return }
+        devices = cards
+        self.heard = heard
+        loaded = true
     }
 
     private func confirm() {

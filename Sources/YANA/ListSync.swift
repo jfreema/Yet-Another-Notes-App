@@ -40,26 +40,12 @@ enum SyncState: Equatable {
     }
 }
 
-/// A list in a sync folder that other devices have and this Mac doesn't
-struct FolderList: Equatable, Sendable {
-    var id: UUID
-    var title: String
-    var tasks: Int
-    /// The names of the devices it's on
-    var devices: [String]
-
-    /// What it says under its name: “5 tasks, on Jared's MacBook Air”
-    var detail: String {
-        var parts = [tasks == 0 ? "No tasks" : tasks == 1 ? "1 task" : "\(tasks) tasks"]
-        if !devices.isEmpty { parts.append("on " + devices.formatted(.list(type: .and))) }
-        return parts.joined(separator: ", ")
-    }
-}
-
-/// Syncs to-do lists through sync folders. Every few seconds, and right after a change here, it reads the other
-/// devices' copies of each synced list, merges them with this Mac's copy, shows the result, and writes this Mac's copy
-/// when it has changed. Lists another device sends here get a tab of their own. It also keeps track of which folders
-/// could be read, for the tabs' sync marks, and notices a device that starts using a folder.
+/// Syncs to-do lists through sync folders. When a folder says something in it changed, right after a change here, and
+/// about once a minute besides, it reads the other devices' copies of each synced list, merges them with this Mac's
+/// copy, shows the result, and writes this Mac's copy when it has changed. Lists another device sends here get a tab
+/// of their own. What a pass does is worked out by `SyncPass`, which YANA for iPhone uses too: this class reads and
+/// writes the files, and shows the result. It also keeps track of which folders could be read, for the tabs' sync
+/// marks, and notices a device that starts using a folder.
 @MainActor
 final class ListSync {
     weak var host: SyncHost?
@@ -69,17 +55,30 @@ final class ListSync {
     /// Where what's remembered between launches is kept. The tests give their own.
     private let defaults: UserDefaults
     private var timer: Timer?
+    /// Says when something changes in a sync folder, once syncing has started
+    private var watcher: FolderWatcher?
     private var reading = false
+    /// Whether a sync was asked for while one was reading the folders, so another follows it
+    private var again = false
     /// Each synced list as last saved, shown or merged, to tell what's changed since by comparing
     private var known: [UUID: Note] = [:]
-    /// Each list's copy as this Mac last wrote it, and when
-    private var written: [UUID: (copy: SyncedList, at: Date)] = [:]
+    /// Works out each pass, and remembers each list's copy as this Mac last wrote it
+    private var engine = SyncPass(device: ThisDevice.id)
 
-    /// The lists this Mac stopped syncing, with when, so one whose tab was deleted doesn't come straight back
+    /// The lists this Mac stopped syncing, with when, so one whose tab was deleted doesn't come straight back. Kept
+    /// between launches, for as long as a deleted task is.
     private var left: [UUID: Date] = [:]
 
     /// How long a copy just written is given to show up in the folder as written, before it's written again
-    var writeSettles: TimeInterval = 15
+    var writeSettles: TimeInterval {
+        get { engine.writeSettles }
+        set { engine.writeSettles = newValue }
+    }
+
+    /// How often the folders are read when nothing says they've changed. It catches a sync service that doesn't say.
+    var readEvery: TimeInterval = 60
+    /// How long a folder's changes are gathered before they're read, so a burst of them is read once
+    var changesGathered: TimeInterval = 1
 
     /// The folders as of the last look: their names by id, and the ones that couldn't be read
     private var folderNames: [String: String] = [:]
@@ -98,22 +97,41 @@ final class ListSync {
     private enum Key {
         static let lastRead = "syncLastRead"
         static let devices = "syncKnownDevices"
+        static let left = "syncLeft"
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         lastRead = (defaults.dictionary(forKey: Key.lastRead) as? [String: Date]) ?? [:]
+        let forgotten = Date().addingTimeInterval(-SyncMerge.deletionsKept)
+        for (key, date) in (defaults.dictionary(forKey: Key.left) as? [String: Date]) ?? [:] where date > forgotten {
+            if let id = UUID(uuidString: key) { left[id] = date }
+        }
     }
 
+    /// Starts syncing: now, whenever a sync folder says something in it changed, and every `readEvery` besides
     func start() {
         let me = DeviceCard(id: ThisDevice.id, name: ThisDevice.name, seen: Date())
         let folders = self.folders()
         Task { await files.register(me, in: folders) }
-        let timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+        let watcher = FolderWatcher(latency: changesGathered) { [weak self] in self?.run() }
+        watcher.watch(folders.map(\.url.path))
+        self.watcher = watcher
+        let timer = Timer.scheduledTimer(withTimeInterval: readEvery, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.run() }
         }
-        timer.tolerance = 0.5
+        timer.tolerance = readEvery / 6
         self.timer = timer
+        // Not before the window that starts it has finished setting up
+        Task { [weak self] in await self?.pass() }
+    }
+
+    /// Stops what `start` started. YANA syncs for as long as it runs, so only the tests stop.
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        watcher?.stop()
+        watcher = nil
     }
 
     /// A tab's note, and for a synced list, stamped with when each change was made since it was last known
@@ -136,16 +154,7 @@ final class ListSync {
     /// earlier time it synced mixes in.
     func start(_ page: NotePage, in folder: SyncFolder, to devices: [String]) {
         let now = Date()
-        var note = page.note
-        note.id = UUID()
-        note.items = note.items.map { item in
-            var item = item
-            item.changed = now
-            return item
-        }
-        // A name it already has goes with it
-        note.sync = SyncInfo(folder: folder.id, devices: [ThisDevice.id] + devices, devicesChanged: now,
-                             orderChanged: now, deleted: [:], nameChanged: note.name == nil ? nil : now)
+        let note = page.note.startingToSync(in: folder.id, from: ThisDevice.id, to: devices, at: now)
         page.id = note.id
         page.sync = note.sync
         known[note.id] = note
@@ -178,23 +187,30 @@ final class ListSync {
         let note = self.note(of: page)
         page.sync = nil
         known[note.id] = nil
-        written[note.id] = nil
+        engine.forget(note.id)
         guard let folder = folders().first(where: { $0.id == note.sync?.folder }),
-              var copy = SyncedList(note, device: ThisDevice.id) else { return }
-        copy.items = []
-        copy.devices.removeAll { $0 == ThisDevice.id }
-        copy.devicesChanged = Date()
-        left[note.id] = copy.devicesChanged
+              let copy = SyncedList(note, device: ThisDevice.id)?.leaving(at: Date()) else { return }
+        remember(left: note.id, at: copy.devicesChanged)
         let file = folder.copy(of: note.id, by: ThisDevice.id)
-        let last = copy
-        Task { await files.write(last, to: file) }
+        Task { await files.write(copy, to: file) }
+    }
+
+    /// Remembers when this Mac stopped syncing a list, or with no date, that it syncs it again
+    private func remember(left id: UUID, at date: Date?) {
+        guard left[id] != date else { return }
+        left[id] = date
+        defaults.set(Dictionary(uniqueKeysWithValues: left.map { ($0.key.uuidString, $0.value) }), forKey: Key.left)
     }
 
     // MARK: Syncing
 
-    /// Syncs now, unless it already is
+    /// Syncs now. If the folders are being read already, it syncs again once that's done, since what was read may
+    /// have changed since.
     func run() {
-        guard !reading else { return }
+        guard !reading else {
+            again = true
+            return
+        }
         guard !folders().isEmpty else { return took([], found: [:]) }
         Task { await pass() }
     }
@@ -203,6 +219,8 @@ final class ListSync {
     func pass() async {
         let folders = self.folders()
         guard !reading else { return }
+        // The folders may not be the ones watched so far
+        watcher?.watch(folders.map(\.url.path))
         guard !folders.isEmpty else { return took([], found: [:]) }
         reading = true
         let found = await files.read(folders)
@@ -215,6 +233,10 @@ final class ListSync {
         if now.timeIntervalSince(devicesLooked) >= devicesLookedEvery {
             devicesLooked = now
             noticed(await files.cards(in: folders), in: folders)
+        }
+        if again {
+            again = false
+            run()
         }
     }
 
@@ -229,7 +251,7 @@ final class ListSync {
     }
 
     /// Takes note of which folders were read just now, and tells the host when one stops or starts being readable
-    private func took(_ folders: [SyncFolder], found: [String: [UUID: [SyncedList]]]) {
+    private func took(_ folders: [SyncFolder], found: FoundLists) {
         let now = Date()
         var names: [String: String] = [:]
         var stopped: Set<String> = []
@@ -263,27 +285,7 @@ final class ListSync {
         let cards = await files.cards(in: [folder])[folder.id] ?? []
         let names = Dictionary(cards.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         let here = Set(host?.notePages.map { $0.id } ?? [])
-        let now = Date()
-        var lists: [FolderList] = []
-        for (id, copies) in found[folder.id] ?? [:] where !here.contains(id) {
-            guard let merged = elsewhere(copies, now: now) else { continue }
-            let note = Note(id: id, kind: .list, items: merged.items, name: merged.name)
-            lists.append(FolderList(id: id, title: note.title, tasks: merged.items.count,
-                                    devices: merged.devices.compactMap { names[$0] }))
-        }
-        return lists.sorted { ($0.title, $0.id.uuidString) < ($1.title, $1.id.uuidString) }
-    }
-
-    /// A list's copies merged, if other devices still sync it and it doesn't come to this Mac
-    private func elsewhere(_ copies: [SyncedList], now: Date) -> SyncedList? {
-        let me = ThisDevice.id
-        let others = copies.filter { $0.device != me }
-        guard !others.isEmpty else { return nil }
-        // This Mac's copy counts when there is one, as it does for a list sent here
-        let mine = copies.first { $0.device == me } ?? SyncedList(device: me)
-        let merged = SyncMerge.merge([mine] + others, now: now)
-        guard !merged.devices.isEmpty, !merged.devices.contains(me) else { return nil }
-        return merged
+        return engine.lists(in: found[folder.id] ?? [:], here: here, names: names, now: Date())
     }
 
     /// Brings lists in a sync folder to this Mac, each in a tab of its own. This Mac joins the devices each list goes
@@ -293,15 +295,11 @@ final class ListSync {
         let found = await files.read([folder])
         let now = Date()
         for id in ids where !host.notePages.contains(where: { $0.id == id }) {
-            guard let merged = elsewhere(found[folder.id]?[id] ?? [], now: now) else { continue }
-            // Later than the change it follows, even if the other device's clock is ahead of this Mac's
-            let changed = max(now, merged.devicesChanged.addingTimeInterval(1))
-            let sync = SyncInfo(folder: folder.id, devices: merged.devices + [ThisDevice.id], devicesChanged: changed,
-                                orderChanged: merged.orderChanged, deleted: merged.deleted,
-                                nameChanged: merged.nameChanged)
-            let note = Note(id: id, kind: .list, items: merged.items, name: merged.name, sync: sync)
+            guard let note = engine.joining(id, from: found[folder.id]?[id] ?? [], in: folder.id, now: now) else {
+                continue
+            }
             known[id] = note
-            left[id] = nil
+            remember(left: id, at: nil)
             logger.notice("Bringing a list in a sync folder to this Mac")
             host.addSynced(note)
         }
@@ -325,16 +323,12 @@ final class ListSync {
         var changed = false
         for folder in folders {
             guard let there = cards[folder.id] else { continue }
-            guard let before = known[folder.id] else {
-                known[folder.id] = there.map(\.id)
+            let look = engine.noticed(there, listed: there.map(\.id), before: known[folder.id])
+            if look.known != known[folder.id] {
+                known[folder.id] = look.known
                 changed = true
-                continue
             }
-            let new = there.filter { $0.id != ThisDevice.id && !before.contains($0.id) }
-            guard !new.isEmpty else { continue }
-            known[folder.id] = before + new.map(\.id)
-            changed = true
-            offers += new.filter { !lists(notGoingTo: $0.id, in: folder).isEmpty }.map { ($0, folder) }
+            offers += look.new.filter { !lists(notGoingTo: $0.id, in: folder).isEmpty }.map { ($0, folder) }
         }
         if changed { defaults.set(known, forKey: Key.devices) }
         for (device, folder) in offers {
@@ -344,78 +338,57 @@ final class ListSync {
     }
 
     /// Merges what was read from the folders into the tabs, and gives back this Mac's copies to write
-    private func merge(_ found: [String: [UUID: [SyncedList]]],
-                       folders: [SyncFolder]) -> [(copy: SyncedList, file: URL)] {
+    private func merge(_ found: FoundLists, folders: [SyncFolder]) -> [(copy: SyncedList, file: URL)] {
         guard let host else { return [] }
         let me = ThisDevice.id
-        let now = Date()
-        var writes: [(copy: SyncedList, file: URL)] = []
-
-        for page in host.notePages {
+        // Only the synced lists are looked at, so a pass doesn't copy out the text of every note
+        let pages = host.notePages
+        var synced: [UUID: NotePage] = [:]
+        var lists: [Note] = []
+        var waiting: Set<UUID> = []
+        for page in pages where page.sync != nil {
             let local = note(of: page)
-            guard local.kind == .list, let sync = local.sync,
-                  let folder = folders.first(where: { $0.id == sync.folder }),
-                  let lists = found[folder.id] else { continue }
-            let copies = lists[local.id] ?? []
-            let others = copies.filter { $0.device != me }
-            guard let mine = SyncedList(local, device: me) else { continue }
-            let merged = SyncMerge.merge([mine] + others, now: now)
-            let file = folder.copy(of: local.id, by: me)
+            guard local.kind == .list, synced[local.id] == nil else { continue }
+            synced[local.id] = page
+            lists.append(local)
+            // Only a task under the mouse makes the others' changes wait, and only until the mouse comes up. A task
+            // with the cursor in it doesn't: the cursor can sit there for hours, and then nothing would sync.
+            if (page as? TodoList)?.isDragging == true { waiting.insert(local.id) }
+        }
+        let changes = engine.run(lists: lists, here: Set(pages.map { $0.id }), folders: folders.map(\.id), found: found,
+                                 left: left, waiting: waiting, now: Date())
 
-            // Another device took this Mac off the list
-            if !merged.devices.contains(me) {
-                known[local.id] = nil
-                written[local.id] = nil
-                host.removeSynced(page)
-                Task { await files.delete(file) }
-                continue
-            }
-
-            let result = local.adopting(merged)
-            if !result.items.looksLike(local.items) || result.name != local.name {
-                // Only a task under the mouse makes the others' changes wait, and only until the mouse comes up. A
-                // task with the cursor in it doesn't: the cursor can sit there for hours, and then nothing would sync.
-                if (page as? TodoList)?.isDragging == true { continue }
-                known[local.id] = result
+        // Another device took this Mac off these
+        for id in changes.removed {
+            known[id] = nil
+            if let page = synced[id] { host.removeSynced(page) }
+        }
+        for merged in changes.merged {
+            guard let page = synced[merged.note.id] else { continue }
+            known[merged.note.id] = merged.note
+            if merged.looksDifferent {
                 logger.info("Showing other devices' changes to a synced list")
-                host.showSynced(result, on: page)
+                host.showSynced(merged.note, on: page)
             } else {
-                known[local.id] = result
-                page.sync = result.sync
+                page.sync = merged.note.sync
             }
-
-            // This Mac's copy is written whenever the folder doesn't have it as it is now. One just written may not have
-            // been read back yet, or couldn't be written, so it's given a while before it's written again.
-            let onDisk = copies.first { $0.device == me }
-            guard onDisk != merged else { continue }
-            if let last = written[local.id], last.copy == merged,
-               now.timeIntervalSince(last.at) < writeSettles { continue }
-            written[local.id] = (merged, now)
-            writes.append((merged, file))
+        }
+        for note in changes.added {
+            known[note.id] = note
+            remember(left: note.id, at: nil)
+            logger.notice("Adding a list another device syncs here")
+            host.addSynced(note)
         }
 
-        // Lists sent here from another device
-        let here = Set(host.notePages.map { $0.id })
-        for folder in folders {
-            for (id, copies) in found[folder.id] ?? [:] where !here.contains(id) {
-                let others = copies.filter { $0.device != me }
-                guard !others.isEmpty else { continue }
-                // This Mac's own copy counts when there is one. After the list's tab was deleted here, it's what says
-                // the list no longer comes here, until the other devices have heard and say so too.
-                let mine = copies.first { $0.device == me } ?? SyncedList(device: me)
-                let merged = SyncMerge.merge([mine] + others, now: now)
-                guard merged.devices.contains(me) else { continue }
-                // Read before this Mac's copy said it had left
-                if let when = left[id], merged.devicesChanged <= when { continue }
-                left[id] = nil
-                let sync = SyncInfo(folder: folder.id, devices: merged.devices, devicesChanged: merged.devicesChanged,
-                                    orderChanged: merged.orderChanged, deleted: merged.deleted,
-                                    nameChanged: merged.nameChanged)
-                let note = Note(id: id, kind: .list, items: merged.items, name: merged.name, sync: sync)
-                known[id] = note
-                logger.notice("Adding a list another device syncs here")
-                host.addSynced(note)
-            }
+        let places = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for delete in changes.deletes {
+            guard let file = places[delete.folder]?.copy(of: delete.list, by: me) else { continue }
+            Task { await files.delete(file) }
+        }
+        var writes: [(copy: SyncedList, file: URL)] = []
+        for write in changes.writes {
+            guard let folder = places[write.folder] else { continue }
+            writes.append((copy: write.copy, file: folder.copy(of: write.list, by: me)))
         }
         return writes
     }
@@ -431,9 +404,9 @@ actor SyncFiles {
     private var unreadable: Set<String> = []
 
     /// Every list in every folder: folder id → list id → the devices' copies. A folder that can't be read is left out.
-    func read(_ folders: [SyncFolder]) -> [String: [UUID: [SyncedList]]] {
+    func read(_ folders: [SyncFolder]) -> FoundLists {
         let manager = FileManager.default
-        var found: [String: [UUID: [SyncedList]]] = [:]
+        var found: FoundLists = [:]
         for folder in folders {
             let lists: [URL]
             do {

@@ -67,8 +67,9 @@ struct FolderListsView: View {
                     .disabled(picked.isEmpty || bringing)
             }
         }
-        .task {
-            await watch()
+        // Again whenever a sync has read the folders: iCloud Drive may still be bringing down what's in this one
+        .task(id: model.syncPasses) {
+            await load()
         }
     }
 
@@ -80,21 +81,20 @@ struct FolderListsView: View {
         }
     }
 
-    /// Reads the folder now and every few seconds, since iCloud Drive may still be downloading what's in it
-    private func watch() async {
-        while !Task.isCancelled {
-            if let open = model.openFolder(folder.id) {
-                let found = await model.sync.lists(in: open)
-                ticked.formUnion(found.map(\.id).filter { !seen.contains($0) })
-                seen.formUnion(found.map(\.id))
-                if found != lists { lists = found }
-                cantOpen = false
-            } else {
-                cantOpen = true
-            }
-            loaded = true
-            try? await Task.sleep(for: .seconds(3))
+    /// Reads the folder's lists. They're read again after each sync that reads the folders, and a sync follows every
+    /// few seconds for as long as iCloud Drive is still bringing down what's in the folder.
+    private func load() async {
+        if let open = model.openFolder(folder.id) {
+            let found = await model.sync.lists(in: open)
+            guard !Task.isCancelled else { return }
+            ticked.formUnion(found.map(\.id).filter { !seen.contains($0) })
+            seen.formUnion(found.map(\.id))
+            if found != lists { lists = found }
+            cantOpen = false
+        } else {
+            cantOpen = true
         }
+        loaded = true
     }
 
     private func bring() {

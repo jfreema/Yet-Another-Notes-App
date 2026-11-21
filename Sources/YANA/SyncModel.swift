@@ -2,29 +2,15 @@ import Foundation
 import SystemConfiguration
 
 // The Mac's side of syncing: the sync folders it uses and its own id. What goes in the folders, and how copies
-// merge, is in SyncFormat.swift.
+// merge, is in SyncFormat.swift, and where things are in a folder is in SyncPass.swift (`SyncFolderLayout`).
 
 /// A folder synced lists live in, such as YANA Sync in iCloud Drive or one shared with another Apple ID
-struct SyncFolder: Codable, Equatable, Sendable {
+struct SyncFolder: Codable, Equatable, Sendable, SyncFolderLayout {
     /// Its id on this Mac. Another device knows the same folder by its own id.
     var id: String
     var url: URL
 
     var name: String { url.lastPathComponent }
-    var devicesFolder: URL { url.appendingPathComponent("devices", isDirectory: true) }
-    var listsFolder: URL { url.appendingPathComponent("lists", isDirectory: true) }
-
-    func listFolder(_ list: UUID) -> URL {
-        listsFolder.appendingPathComponent(list.uuidString, isDirectory: true)
-    }
-
-    func copy(of list: UUID, by device: String) -> URL {
-        listFolder(list).appendingPathComponent(device + ".json")
-    }
-
-    func card(of device: String) -> URL {
-        devicesFolder.appendingPathComponent(device + ".json")
-    }
 
     /// Where it is, to tell folders with the same name apart: "iCloud Drive", or the folder it's in
     var place: String {

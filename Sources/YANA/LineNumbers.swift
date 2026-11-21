@@ -1,11 +1,13 @@
 import AppKit
 
 /// The line numbers down a text tab's left side, dim except for the line the cursor is on. A line that wraps keeps
-/// one number, on its first row.
+/// one number, on its first row. Where the lines start is kept in a `LineIndex`, brought up to date with each edit, so
+/// typing, moving the cursor and scrolling don't count the note's lines from the top.
 @MainActor
 final class LineNumberRuler: NSRulerView {
     private weak var textView: NSTextView?
     private var look = Look(textSize: 14, sticky: false)
+    private var lines = LineIndex()
 
     init(textView: NSTextView, scrollView: NSScrollView) {
         self.textView = textView
@@ -25,6 +27,11 @@ final class LineNumberRuler: NSRulerView {
         scrollView.contentView.postsBoundsChangedNotifications = true
         center.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification,
                            object: scrollView.contentView)
+        if let storage = textView.textStorage {
+            lines.rebuild(storage.mutableString)
+            center.addObserver(self, selector: #selector(edited), name: NSTextStorage.didProcessEditingNotification,
+                               object: storage)
+        }
         updateThickness()
     }
 
@@ -47,10 +54,30 @@ final class LineNumberRuler: NSRulerView {
         needsDisplay = true
     }
 
+    /// The text changed, by typing or by being set: only the lines the change touched are looked at again
+    @objc private func edited(_ notification: Notification) {
+        guard let storage = notification.object as? NSTextStorage, storage.editedMask.contains(.editedCharacters) else {
+            return
+        }
+        lines.edit(storage.editedRange, changeInLength: storage.changeInLength, in: storage.mutableString)
+    }
+
+    /// Where the lines start, for the text as it is now. A change the index wasn't told of shows as a different
+    /// length, and then it's worked out again.
+    private func index(of text: NSString) -> LineIndex {
+        if lines.length != text.length { lines.rebuild(text) }
+        return lines
+    }
+
+    /// The text view's text as it holds it, not a copy of it
+    private var text: NSString {
+        if let text = textView?.textStorage?.mutableString { return text }
+        return NSString()
+    }
+
     /// Room for at least two digits, and more as the note grows
     private func updateThickness() {
-        let lines = Self.lineNumber(at: (textView?.string as NSString?)?.length ?? 0, in: textView?.string ?? "")
-        let thickness = look.lineNumberWidth(lines: lines)
+        let thickness = look.lineNumberWidth(lines: index(of: text).count)
         if ruleThickness != thickness { ruleThickness = thickness }
     }
 
@@ -63,15 +90,16 @@ final class LineNumberRuler: NSRulerView {
     override func drawHashMarksAndLabels(in rect: NSRect) {
         guard let textView, let layoutManager = textView.layoutManager,
               let container = textView.textContainer else { return }
-        let string = textView.string as NSString
+        let string = text
+        let lines = self.index(of: string)
         let glyphs = layoutManager.glyphRange(forBoundingRect: textView.visibleRect, in: container)
         let characters = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
-        let current = Self.lineNumber(at: textView.selectedRange().location, in: textView.string)
+        let current = lines.lineNumber(at: textView.selectedRange().location)
         // Where the text view's top is, in the ruler
         let top = convert(NSPoint(x: 0, y: textView.textContainerOrigin.y), from: textView).y
 
         var index = string.lineRange(for: NSRange(location: characters.location, length: 0)).location
-        var number = Self.lineNumber(at: index, in: textView.string)
+        var number = lines.lineNumber(at: index)
         while index < string.length, index <= NSMaxRange(characters) {
             let glyph = layoutManager.glyphIndexForCharacter(at: index)
             let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
@@ -98,7 +126,9 @@ final class LineNumberRuler: NSRulerView {
         label.draw(at: NSPoint(x: ruleThickness - width - Look.lineNumberMargin, y: baseline - font.ascender), withAttributes: attributes)
     }
 
-    /// Which line, counting from 1, the character at `location` is on. Past a final line break is the line after it.
+    /// Which line, counting from 1, the character at `location` is on, counted from the top of the text. Past a final
+    /// line break is the line after it. The ruler itself looks lines up in its `LineIndex`, which the tests check
+    /// against this.
     nonisolated static func lineNumber(at location: Int, in text: String) -> Int {
         let string = text as NSString
         var number = 1

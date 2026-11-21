@@ -33,12 +33,14 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 | The note window: tabs, pin, transparency slider, sticky note mode, converting a note to a list, opening and saving .txt files | `NoteWindow` |
 | The tab strip | `TabBar` |
 | A text tab, and how tabs look (`Look`: font and colors, sticky or not) | `Pages` |
-| A text tab's line numbers (an `NSRulerView`) | `LineNumbers` |
+| A text tab's line numbers (an `NSRulerView`), and where each line starts, kept up to date edit by edit | `LineNumbers`, `LineIndex` |
 | A to-do list tab, its rows, their numbers, wrapping a long task, and dragging them | `TodoList` |
 | What a tab holds, and the change times a synced list keeps (`Note.stamped`) | `Note` |
 | Syncing lists: what's in a sync folder, and merging copies (shared with YANA for iPhone) | `SyncFormat` |
+| Syncing lists: what one pass does with the lists here and the copies in the folders, where things are in a folder (shared with YANA for iPhone) | `SyncPass` |
 | Syncing lists: the sync folders this Mac uses, this Mac's id | `SyncModel` |
-| Syncing lists: reading the folders every few seconds, merging, adding or taking away tabs, whether each list is syncing, a folder's lists to bring here, and noticing a new device | `ListSync` |
+| Syncing lists: reading the folders when they change, showing what `SyncPass` works out (adding or taking away tabs), whether each list is syncing, a folder's lists to bring here, and noticing a new device | `ListSync` |
+| Syncing lists: hearing when something changes in a sync folder (FSEvents) | `FolderWatcher` |
 | Sync This List…: the folder and the devices a list goes to | `SyncSheet` |
 | Saving the notes to `Notes.json`, and Recently Deleted | `NoteStore` |
 | Check for Updates | `Updater` |
@@ -88,6 +90,12 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 - **Sticky note mode forces the light appearance** on the window, so dark mode doesn't fight the yellow.
 - **1.0 kept one note in `Note.txt`.** `NoteStore` turns it into the first tab when there's no `Notes.json`, and
   leaves the file where it is.
+- **Typing does as little as it can.** A keystroke retitles only its own tab (`NoteWindowController.noteChanged`,
+  `TabBar.retitle`), and a text tab finds its title without copying the note out of the text view (`TextPage.title`,
+  which has to match `Note.title`). The line numbers keep a `LineIndex` of where lines start, updated from the text
+  storage's `editedRange` and `changeInLength`, so finding the cursor's line is a look-up and not a count from the top;
+  it starts over if an edit doesn't fit. The notes are saved half a second after the last change, and `NoteStore.save`
+  skips the write when the notes encode to what it last read or wrote, which it keeps in memory.
 - **Activation:** since macOS 14, `NSApp.activate()` is a request macOS can turn down, so alerts and the About panel
   use `NSApp.activateRegardless()`.
 
@@ -116,8 +124,17 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   It clears that list's undo. Only a click or drag in progress makes changes wait (`TodoList.isDragging`), and never
   for long. 1.7.0 made them wait for any task being edited, and skipped writing this Mac's copy while they waited, so
   a cursor left in a task stopped that Mac syncing either way.
-- **A sync runs every 3 seconds, right after a save, and when the note is shown or hidden** (`ListSync.run`). The
-  timer alone can be slowed by App Nap while the note is hidden.
+- **A sync runs when a sync folder changes, right after a save, and when the note is shown or hidden**
+  (`ListSync.run`). `FolderWatcher` is an FSEvents stream on the sync folders, which also reports what iCloud Drive
+  brings in, with changes gathered for a second. This Mac's own writes are reported too, so each is followed by one
+  pass that finds nothing to do. A pass also runs once a minute (`ListSync.readEvery`), in case a sync service
+  changes a folder without the file system saying so. Until 1.9.1 it read every folder every 3 seconds.
+- **What a pass does is in `SyncPass`**, which YANA for iPhone compiles too: given the synced lists here and every
+  copy found in the folders, it gives back the lists to show, add and take away, and this device's copies to write
+  and delete. It's pure (no files, no UI), so `SyncPassTests` cover it directly. `ListSync` and the iPhone's
+  `PhoneSync` only read and write the files and hand the result to the window or the model. Keep it to Foundation.
+- **A sync asked for while the folders are being read is followed by another** (`ListSync.again`), since what was
+  read may be out of date by then. With the 3-second timer gone, nothing else would catch it for a minute.
 - **This Mac's copy is written whenever the folder's doesn't match**, and again every 15 seconds for as long as it
   still doesn't (`ListSync.writeSettles`), which covers a write that failed.
 - **`ListSyncTests` sync a real `TodoList` through a folder**, with the other device's copies written by hand
@@ -126,7 +143,9 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 - **Starting to sync gives the list a new id**, so files left from an earlier time it synced don't mix in. Stopping
   writes an empty copy without this Mac in its devices; being taken off by another device deletes this Mac's copy.
   That empty copy is what keeps a list whose tab was deleted from coming back: finding lists in a folder counts this
-  Mac's own copy too, and `ListSync.left` covers the moment before the copy is written.
+  Mac's own copy too, and `ListSync.left` covers the moment before the copy is written. `left` is kept in
+  UserDefaults (`syncLeft`) for as long as a deleted task is, so if an older copy of this Mac's lands late, after
+  YANA has been reopened, the list still stays gone and its copy says again that it left.
 - **Reading and writing is in the `SyncFiles` actor**, off the main thread, since a file in iCloud Drive may have to
   download first. Every copy is read every time: a modification date can't tell whether one changed, since a sync
   service may keep dates only to the second.
@@ -157,14 +176,14 @@ setup and user guide.
 | Launch, and syncing as YANA comes and goes | `YANAApp`, `AppModel.became` |
 | The lists, the folders, this iPhone's id and name, saving to `Lists.json`, Recently Deleted, Undo for deleted tasks, whether a list is syncing, and a new device to offer lists to | `AppModel` |
 | Editing a list: Return in a task, empty tasks, change times | `Note+Phone` |
-| Syncing: the same passes as `ListSync` on the Mac, a folder's lists to bring here, and joining them | `PhoneSync` |
+| Syncing: reading the folders when they change, the same passes as the Mac (`SyncPass`), a folder's lists to bring here, and joining them | `PhoneSync` |
 | Reading and writing the folders, iCloud Drive downloads | `PhoneFiles` |
 | A sync folder: its bookmark, and its paths | `Folders` |
 | The screens | `ListsView`, `ListView`, `SyncSettingsView`, `SettingsView`, `FolderListsView`, `DeletedListsView`, `Look` |
 
-- **It compiles `Sources/YANA/Note.swift` and `Sources/YANA/SyncFormat.swift`** from the Mac app, so both apps write
-  and merge the same files. Keep those two files to Foundation. A change to them runs the iPhone workflow, which runs
-  the Mac's tests too.
+- **It compiles `Sources/YANA/Note.swift`, `SyncFormat.swift` and `SyncPass.swift`** from the Mac app, so both apps
+  write and merge the same files, and do the same thing on each pass. Keep those three files to Foundation. A change
+  to them runs the iPhone workflow, which runs the Mac's tests too.
 - **A sync folder is a security-scoped bookmark**, picked with `fileImporter`. YANA has no iCloud entitlement: it
   uses the folder you picked in Files, so a folder shared from another Apple ID works the same as YANA Sync.
 - **iCloud Drive may not have downloaded a file yet.** iOS lists one of those as `.<name>.icloud`; `PhoneFiles` asks
@@ -175,7 +194,18 @@ setup and user guide.
   turns it into a new task the way Return works on the Mac.
 - **Starting to sync gives the list a new id**, as on the Mac. `AppModel` remembers the old id, so the list's screen
   keeps showing it.
-- **It syncs only while open**: every 3 seconds, soon after a change, and once more as it goes to the background.
+- **It syncs only while open**: when a sync folder changes, soon after a change here, and once more as it goes to
+  the background. `PhoneSync` presents each sync folder to iOS (`FolderPresenter`, an `NSFilePresenter`) while YANA
+  is open, which is how iOS says what iCloud Drive brought in; changes are gathered for most of a second. The
+  presenters come off as YANA goes to the background, as iOS expects. Two things cover a change iOS doesn't report:
+  a pass every 30 seconds (`readEvery`), and one every 3 seconds for as long as iCloud Drive is still bringing a file
+  down (`PhoneFiles.askedForDownloads`). It used to read every folder every 3 seconds. The presenters can't be
+  tried against the real iCloud Drive in the simulator, which is why the fallback is 30 seconds and not a minute.
+- **Typing is saved after a pause**, not a character at a time: `AppModel.change(_:typing:)` marks it `unsaved`, and
+  it's written with the sync that follows 0.6 seconds after the last character, by any other change, by Return making
+  a task, and as YANA goes to the background.
+- **The screens that show a folder read it again after each sync pass** (`AppModel.syncPasses`), not on a timer of
+  their own.
 - **Undo is one deletion deep.** `AppModel.undoable` holds the tasks last swiped away or cleared, with their places,
   and `ListView` shows the Undo bar for six seconds. Putting them back is an ordinary change, so in a synced list
   they're stamped later than their deletion and come back on the other devices too.
@@ -183,8 +213,8 @@ setup and user guide.
   deleted here and one another device took off this iPhone, as it was here and without its syncing, for 30 days, 50
   at most. Putting one back gives it a new id, as on the Mac.
 - **Adding a folder shows its lists** (`FolderListsView`, from `PhoneSync.lists(in:)`), and `join` brings the ones
-  switched on here the way the Mac's `ListSync.join` does. It reads the folder every few seconds while it's showing,
-  since iCloud Drive may still be downloading what's in it. Tapping a folder in Settings shows them again.
+  switched on here the way the Mac's `ListSync.join` does. It reads the folder again after each sync pass while it's
+  showing, since iCloud Drive may still be downloading what's in it. Tapping a folder in Settings shows them again.
 - **A list says when it has stopped syncing** (`AppModel.syncProblem`): its folder's bookmark wouldn't open, or the
   folder couldn't be listed on the last pass. When each folder was last read is in UserDefaults (`syncLastRead`).
 - **A device that starts using a folder is offered its lists** (`AppModel.noticed`, `DeviceOfferView`), as on the Mac.

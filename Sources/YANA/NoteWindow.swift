@@ -336,7 +336,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         let old = page.name
         guard name != old, pages.contains(where: { $0 === page }) else { return }
         page.name = name
-        noteChanged()
+        noteChanged(nil)
         page.undo.registerUndo(withTarget: self) { controller in
             MainActor.assumeIsolated { controller.setName(old, of: page) }
         }
@@ -705,7 +705,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         page.sync = note.sync
         page.file = note.file
         page.apply(look)
-        page.onChange = { [unowned self] in self.noteChanged() }
+        page.onChange = { [unowned self, weak page] in self.noteChanged(page) }
         return page
     }
 
@@ -731,8 +731,18 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
 
     // MARK: Saving
 
-    private func noteChanged() {
-        updateTabs()
+    /// The tabs' names as the tab bar shows them, which the tests look at
+    var tabTitles: [String] { tabBar.titles }
+
+    /// Something in a tab changed: its name is shown as it is now, and the notes are saved once the changes pause.
+    /// Typing can only change the name of the tab it's in, so only that tab is looked at. Without a page, all the
+    /// tabs are shown again.
+    private func noteChanged(_ page: NotePage?) {
+        if let page, let index = pages.firstIndex(where: { $0 === page }) {
+            tabBar.retitle(index, to: page.title)
+        } else {
+            updateTabs()
+        }
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {

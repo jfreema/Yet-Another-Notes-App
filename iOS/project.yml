@@ -1,6 +1,6 @@
 # YANA for iPhone. There's no Xcode project in the repo: `xcodegen generate` in this folder makes YANA.xcodeproj from
-# this file (brew install xcodegen). The app shares Note.swift and SyncFormat.swift with the Mac app, so both read and
-# write the same sync files.
+# this file (brew install xcodegen). The app shares Note.swift, SyncFormat.swift and SyncPass.swift with the Mac app, so
+# both read, merge and write the same sync files the same way.
 name: YANA
 options:
   bundleIdPrefix: io.github.jfreema
@@ -22,6 +22,8 @@ targets:
       - path: ../Sources/YANA/Note.swift
         group: Shared
       - path: ../Sources/YANA/SyncFormat.swift
+        group: Shared
+      - path: ../Sources/YANA/SyncPass.swift
         group: Shared
     settings:
       base:

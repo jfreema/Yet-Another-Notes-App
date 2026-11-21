@@ -133,6 +133,86 @@ struct NoteWindowTests {
         #expect(controller.recentlyDeleted.isEmpty)
     }
 
+    /// The text view of a text tab
+    private func textView(in view: NSView) -> NSTextView? {
+        if let text = view as? NSTextView { return text }
+        for subview in view.subviews {
+            if let text = textView(in: subview) { return text }
+        }
+        return nil
+    }
+
+    @Test func typingNamesItsOwnTab() throws {
+        defer { cleanUp() }
+        let controller = open([Note(kind: .text, text: "Hi"), Note(kind: .list, items: [ToDo(text: "Milk")]),
+                               Note(kind: .text, text: "Later")])
+        controller.select(0)
+        #expect(controller.tabTitles == ["Hi", "Milk", "Later"])
+        let page = try #require(controller.notePages[0] as? TextPage)
+        let text = try #require(textView(in: page.view))
+
+        // A new first line is the tab's name, as it's typed
+        text.insertText("Ideas\n", replacementRange: NSRange(location: 0, length: 0))
+        #expect(page.note.text == "Ideas\nHi")
+        #expect(controller.tabTitles == ["Ideas", "Milk", "Later"])
+        text.insertText(" for the trip", replacementRange: NSRange(location: 5, length: 0))
+        #expect(controller.tabTitles == ["Ideas for the trip", "Milk", "Later"])
+
+        // A list's is its first task, and a name given to a tab stays whatever is typed
+        let list = try #require(controller.notePages[1] as? TodoList)
+        list.show([ToDo(text: "Eggs"), ToDo(text: "Milk")])
+        list.onChange?()
+        #expect(controller.tabTitles == ["Ideas for the trip", "Eggs", "Later"])
+        controller.setName("Trip", of: page)
+        text.insertText("More\n", replacementRange: NSRange(location: 0, length: 0))
+        #expect(controller.tabTitles == ["Trip", "Eggs", "Later"])
+    }
+
+    @Test func aTextTabsNameIsItsNotesTitle() {
+        let texts = ["", "Hello", "\n\n  Second line \nThird", "   \n\t", String(repeating: "x", count: 60),
+                     "a\r\nb", "\r\rAfter two returns", "\u{2028}After a separator", "  é 😀  \n"]
+        for text in texts {
+            let page = TextPage(text: text)
+            #expect(page.title == page.note.title, "\(text.debugDescription)")
+            page.name = "  Named  "
+            #expect(page.title == "Named")
+            #expect(page.title == page.note.title)
+            page.name = "   "
+            #expect(page.title == page.note.title, "\(text.debugDescription)")
+        }
+    }
+
+    @Test func savingWhatsAlreadySavedWritesNothing() throws {
+        defer { cleanUp() }
+        let notes = [Note(kind: .text, text: "Hi"), Note(kind: .list, items: [ToDo(text: "Milk")])]
+        let store = NoteStore(folder: folder)
+        func written() throws -> Date? {
+            try FileManager.default.attributesOfItem(atPath: store.file.path)[.modificationDate] as? Date
+        }
+        store.save(notes)
+        let first = try written()
+        #expect(first != nil)
+        store.save(notes)
+        #expect(try written() == first)
+
+        // Nor by the store YANA opens with next time, until something changes
+        let next = NoteStore(folder: folder)
+        var loaded = next.load()
+        #expect(loaded == notes)
+        next.save(loaded)
+        #expect(try written() == first)
+        loaded[0].text = "Hi there"
+        next.save(loaded)
+        #expect(try written() != first)
+        #expect(NoteStore(folder: folder).load() == loaded)
+
+        // And a file that went missing is written again
+        try FileManager.default.removeItem(at: store.file)
+        let fresh = NoteStore(folder: folder)
+        fresh.save(loaded)
+        #expect(NoteStore(folder: folder).load() == loaded)
+    }
+
     @Test func aListTakenOffThisMacByAnotherDeviceCanBePutBackToo() throws {
         defer { cleanUp() }
         let sync = SyncInfo(folder: "gone", devices: [ThisDevice.id, "air"], devicesChanged: Date(),

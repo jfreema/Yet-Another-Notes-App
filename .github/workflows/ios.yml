@@ -10,6 +10,7 @@ on:
       - iOS/**
       - Sources/YANA/Note.swift
       - Sources/YANA/SyncFormat.swift
+      - Sources/YANA/SyncPass.swift
       - .github/workflows/ios.yml
   workflow_dispatch:
     inputs:
