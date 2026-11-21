@@ -12,10 +12,19 @@ actor PhoneFiles {
     private var cache: [String: (data: Data, list: SyncedList)] = [:]
     /// When this iPhone's card was last checked in each folder, and under what name
     private var registered: [String: (name: String, at: Date)] = [:]
+    /// Whether a file was found that iCloud Drive hasn't brought down, or not as it is now, since this was last asked
+    private var asked = false
+
+    /// Whether iCloud Drive was asked for a file since the last time this was asked. While it's bringing one down,
+    /// the folders are worth reading again soon: it may not say when the file is here.
+    func askedForDownloads() -> Bool {
+        defer { asked = false }
+        return asked
+    }
 
     /// Every list in every folder: folder id → list id → the devices' copies. A folder that can't be read is left out.
-    func read(_ folders: [OpenFolder]) -> [String: [UUID: [SyncedList]]] {
-        var found: [String: [UUID: [SyncedList]]] = [:]
+    func read(_ folders: [OpenFolder]) -> FoundLists {
+        var found: FoundLists = [:]
         for folder in folders {
             let lists: [URL]
             if let contents = Self.contents(of: folder.listsFolder) {
@@ -32,8 +41,9 @@ actor PhoneFiles {
                 var seen: Set<String> = []
                 var listCopies: [SyncedList] = []
                 for listed in files {
-                    guard let found = Self.jsonFile(listed), seen.insert(found.file.path).inserted,
-                          let copy = read(found.file, onPhone: found.onPhone) else { continue }
+                    guard let found = Self.jsonFile(listed), seen.insert(found.file.path).inserted else { continue }
+                    if !found.onPhone { asked = true }
+                    guard let copy = read(found.file, onPhone: found.onPhone) else { continue }
                     listCopies.append(copy)
                 }
                 copies[id] = listCopies
@@ -44,7 +54,10 @@ actor PhoneFiles {
     }
 
     private func read(_ file: URL, onPhone: Bool) -> SyncedList? {
-        guard onPhone, Self.isDownloaded(file), let data = Self.coordinatedRead(file) else { return cache[file.path]?.list }
+        guard onPhone else { return cache[file.path]?.list }
+        let download = Self.download(of: file)
+        if !download.current { asked = true }
+        guard download.readable, let data = Self.coordinatedRead(file) else { return cache[file.path]?.list }
         if let cached = cache[file.path], cached.data == data { return cached.list }
         guard let list = try? JSONDecoder().decode(SyncedList.self, from: data) else { return nil }
         cache[file.path] = (data, list)
@@ -102,6 +115,7 @@ actor PhoneFiles {
             guard let found = Self.jsonFile(listed) else { continue }
             let id = found.file.deletingPathExtension().lastPathComponent
             if !ids.contains(id) { ids.append(id) }
+            if !found.onPhone { asked = true }
             guard found.onPhone, Self.isDownloaded(found.file),
                   let data = Self.coordinatedRead(found.file),
                   let card = try? JSONDecoder().decode(DeviceCard.self, from: data),
@@ -145,13 +159,21 @@ actor PhoneFiles {
     /// Whether a file can be read now without waiting on iCloud Drive. One that's out of date is asked for, and can be
     /// read as it is meanwhile.
     static func isDownloaded(_ file: URL) -> Bool {
+        download(of: file).readable
+    }
+
+    /// Whether a file can be read now without waiting on iCloud Drive, and whether it's the file as it is now. One
+    /// that isn't is asked for, and can be read as it is meanwhile if any of it is here.
+    static func download(of file: URL) -> (readable: Bool, current: Bool) {
         guard let values = try? file.resourceValues(forKeys: [.isUbiquitousItemKey,
                                                               .ubiquitousItemDownloadingStatusKey]),
-              values.isUbiquitousItem == true, let status = values.ubiquitousItemDownloadingStatus else { return true }
+              values.isUbiquitousItem == true, let status = values.ubiquitousItemDownloadingStatus else {
+            return (true, true)
+        }
         if status != .current {
             try? FileManager.default.startDownloadingUbiquitousItem(at: file)
         }
-        return status != .notDownloaded
+        return (status != .notDownloaded, status == .current)
     }
 
     static func coordinatedRead(_ file: URL) -> Data? {

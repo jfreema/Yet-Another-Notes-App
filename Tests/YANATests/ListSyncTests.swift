@@ -116,6 +116,14 @@ struct ListSyncTests {
         return nil
     }
 
+    /// Waits for something to come true, for up to twenty seconds
+    private func until(_ what: Comment, _ done: () -> Bool) async throws {
+        for _ in 0..<200 where !done() {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(done(), what)
+    }
+
     private func cleanUp() {
         try? FileManager.default.removeItem(at: root)
         UserDefaults.standard.removePersistentDomain(forName: settings)
@@ -165,6 +173,61 @@ struct ListSyncTests {
         let after = try FileManager.default.attributesOfItem(atPath: folder.copy(of: list.id, by: me).path)
         #expect(written[.modificationDate] as? Date == after[.modificationDate] as? Date)
         #expect(host.notePages.count == 1)
+    }
+
+    @Test func syncsWhenSomethingChangesInTheFolder() async throws {
+        defer { cleanUp() }
+        let milk = ToDo(text: "Milk", changed: earlier)
+        let (list, _) = makeList([milk])
+        let host = Host([list])
+        let sync = try syncing(host)
+        // Nothing but a change in the folder makes it sync again in the time this test takes
+        sync.readEvery = 3600
+        sync.changesGathered = 0.2
+        sync.start()
+        defer { sync.stop() }
+        try await until("its first pass writes this Mac's copy") { (try? mine(list.id))?.items.map(\.text) == ["Milk"] }
+
+        // The other device's change lands in the folder, and shows here without anything asking for a sync
+        var oat = milk
+        oat.text = "Oat milk"
+        oat.changed = Date().addingTimeInterval(60)
+        await theirs(list.id, [oat])
+        try await until("the other device's change shows") { list.note.items.map(\.text) == ["Oat milk"] }
+        try await until("and this Mac's copy has it") { (try? mine(list.id))?.items.map(\.text) == ["Oat milk"] }
+
+        // A list it sends here later does too
+        let other = UUID()
+        await theirs(other, [ToDo(text: "Tent", changed: earlier)], name: "Camping", named: earlier)
+        try await until("a list sent here gets a tab") { host.notePages.count == 2 }
+        #expect(host.notePages.last?.note.title == "Camping")
+    }
+
+    @Test func aListThisMacLeftStaysGoneTheNextTimeYANAOpens() async throws {
+        defer { cleanUp() }
+        let id = UUID()
+        let milk = ToDo(text: "Milk", changed: earlier)
+        await theirs(id, [milk])
+        let host = Host([])
+        let sync = try syncing(host)
+        await sync.pass()
+        let page = try #require(host.notePages.first)
+        sync.stop(page)
+        host.removeSynced(page)
+        await sync.pass()
+        #expect(try mine(id).devices == [air])
+
+        // An older copy of this Mac's, from before it left, lands over the one saying it left. YANA has been reopened
+        // since, and still knows it left: the list stays gone, and its copy says so again.
+        let old = SyncedList(device: me, items: [milk], orderChanged: earlier, devices: [me, air], devicesChanged: earlier)
+        let wrote = await SyncFiles().write(old, to: folder.copy(of: id, by: me))
+        #expect(wrote)
+        let later = Host([])
+        let again = reopened(later)
+        await again.pass()
+        #expect(later.notePages.isEmpty)
+        #expect(try mine(id).devices == [air])
+        #expect(try mine(id).items.isEmpty)
     }
 
     @Test func keepsAnEmptyTaskBeingTypedInWhenChangesComeIn() async throws {

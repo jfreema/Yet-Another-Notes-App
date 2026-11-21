@@ -6,6 +6,8 @@ protocol NotePage: AnyObject {
     var view: NSView { get }
     /// What's in it now, to save
     var note: Note { get }
+    /// The tab's name, which is its note's title. Asked on every keystroke, so a page gives it the quickest way it can.
+    var title: String { get }
     /// The note's id, which stays with the tab
     var id: UUID { get set }
     /// The name you gave it, if you did
@@ -21,6 +23,10 @@ protocol NotePage: AnyObject {
     /// Puts the cursor where you'd start typing
     func focus()
     func apply(_ look: Look)
+}
+
+extension NotePage {
+    var title: String { note.title }
 }
 
 /// How the notes look: the text size, and whether sticky note mode is on
@@ -105,6 +111,22 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
     }
 
     var note: Note { Note(id: id, kind: .text, text: textView.string, name: name, file: file) }
+
+    /// The same as its note's title (`Note.title`), found without copying the whole note out of the text view: the
+    /// name you gave it, else its first line with something on it
+    var title: String {
+        if let name = Note.name(name) { return name }
+        guard let text = textView.textStorage?.mutableString else { return note.title }
+        var first: String?
+        text.enumerateSubstrings(in: NSRange(location: 0, length: text.length), options: .byLines) { line, _, _, stop in
+            let line = (line ?? "").trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty {
+                first = line
+                stop.pointee = true
+            }
+        }
+        return first.map { String($0.prefix(40)) } ?? "New Note"
+    }
 
     func focus() {
         view.window?.makeFirstResponder(textView)

@@ -5,8 +5,8 @@ off, change them, add them (Return in a task starts a new one below, as on the M
 the checked ones. Add the sync folder and YANA shows the lists in it to bring over. A list started on the iPhone can
 be sent to your Macs with **Sync This List…**. Notes stay on the Mac: only lists come to the iPhone.
 
-It syncs while it's open: every few seconds, after each change, and as you leave it. Changes made on a Mac while it's
-closed come in when you next open it. Pull down on a list to sync right away.
+It syncs while it's open: when something changes in the sync folder, after each change you make, and as you leave it.
+Changes made on a Mac while it's closed come in when you next open it. Pull down on a list to sync right away.
 
 ## Getting it onto your iPhone (once)
 
@@ -115,5 +115,5 @@ brew install xcodegen
 cd iOS && xcodegen generate && open YANA.xcodeproj
 ```
 
-It compiles the Mac app's `Note.swift` and `SyncFormat.swift` too, so both apps read, write and merge exactly the same
-files. The code notes are in [AGENTS.md](../AGENTS.md).
+It compiles the Mac app's `Note.swift`, `SyncFormat.swift` and `SyncPass.swift` too, so both apps read, write and merge
+exactly the same files the same way. The code notes are in [AGENTS.md](../AGENTS.md).

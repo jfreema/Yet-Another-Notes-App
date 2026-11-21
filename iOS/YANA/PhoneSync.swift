@@ -1,27 +1,11 @@
 import Foundation
 
-/// A list in a sync folder that other devices have and this iPhone doesn't
-struct FolderList: Equatable, Identifiable, Sendable {
-    var id: UUID
-    var title: String
-    var tasks: Int
-    /// The names of the devices it's on
-    var devices: [String]
-
-    /// What it says under its name: “5 tasks, on Jared's MacBook Air”
-    var detail: String {
-        var parts = [tasks == 0 ? "No tasks" : tasks == 1 ? "1 task" : "\(tasks) tasks"]
-        if !devices.isEmpty { parts.append("on " + devices.formatted(.list(type: .and))) }
-        return parts.joined(separator: ", ")
-    }
-}
-
-/// Syncs this iPhone's lists through the sync folders, the same way YANA on the Mac does (ListSync there). Every few
-/// seconds while YANA is open, soon after each change here, and when it goes to the background, it reads the other
-/// devices' copies of each synced list, merges them with this iPhone's (`SyncMerge`, shared with the Mac), shows the
-/// result, and writes this iPhone's copy when the folder doesn't have it as it is. Lists another device sends here are
-/// added. Nothing syncs while YANA isn't open: the other devices' changes come in when it's next opened. It also tells
-/// the model which folders it could read, and about a device that starts using one.
+/// Syncs this iPhone's lists through the sync folders, the same way YANA on the Mac does (ListSync there): what a pass
+/// does is worked out by `SyncPass`, which both apps use, and this class reads and writes the files and hands the
+/// result to the model. While YANA is open it syncs when a folder says something in it changed, soon after each change
+/// here, every few seconds while iCloud Drive is still bringing a file down, about twice a minute besides, and once
+/// more as it goes to the background. Nothing syncs while YANA isn't open: the other devices' changes come in when
+/// it's next opened. It also tells the model which folders it could read, and about a device that starts using one.
 @MainActor
 final class PhoneSync {
     private weak var model: AppModel?
@@ -29,25 +13,43 @@ final class PhoneSync {
     private var timer: Timer?
     private(set) var running = false
     private var runAgain = false
-    /// Each list's copy as this iPhone last wrote it, and when
-    private var written: [UUID: (copy: SyncedList, at: Date)] = [:]
+    /// Works out each pass, and remembers each list's copy as this iPhone last wrote it
+    private var engine: SyncPass
     /// How long a copy just written is given to show up in the folder as written, before it's written again
-    var writeSettles: TimeInterval = 15
+    var writeSettles: TimeInterval {
+        get { engine.writeSettles }
+        set { engine.writeSettles = newValue }
+    }
     /// How often the folders' devices are looked at, for one that has started using a folder
     var devicesLookedEvery: TimeInterval = 30
     private var devicesLooked = Date.distantPast
 
+    /// How often the folders are read when nothing says they've changed. It catches a change iOS didn't report.
+    var readEvery: TimeInterval = 30
+    /// How long a folder's changes are gathered before they're read, so a burst of them is read once
+    var changesGathered: TimeInterval = 0.7
+    /// How soon the folders are read again while iCloud Drive is bringing a file down
+    var downloadsCheckedEvery: TimeInterval = 3
+    /// Says when something changes in each sync folder, by the folder's id, while YANA is open
+    private var presenters: [String: FolderPresenter] = [:]
+    private var changeSoon: Task<Void, Never>?
+    private var downloadSoon: Task<Void, Never>?
+
     init(model: AppModel) {
         self.model = model
+        engine = SyncPass(device: model.device)
     }
 
-    /// Syncs every 3 seconds from now on, starting now
+    /// Whether YANA is open and syncing as things change
+    private var started: Bool { timer != nil }
+
+    /// Syncs from now on, starting now: when a sync folder changes, and every `readEvery` besides
     func start() {
         if timer == nil {
-            let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: readEvery, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.run() }
             }
-            timer.tolerance = 0.5
+            timer.tolerance = readEvery / 6
             // Common modes, so it keeps going while a list is scrolled
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
@@ -55,9 +57,19 @@ final class PhoneSync {
         run()
     }
 
+    /// Stops syncing as things change, as YANA goes to the background. iOS doesn't tell an app in the background
+    /// about a folder's changes, and expects it to have stopped asking.
     func stop() {
         timer?.invalidate()
         timer = nil
+        changeSoon?.cancel()
+        changeSoon = nil
+        downloadSoon?.cancel()
+        downloadSoon = nil
+        for presenter in presenters.values {
+            NSFileCoordinator.removeFilePresenter(presenter)
+        }
+        presenters = [:]
     }
 
     /// Syncs now, or right after the pass that's going
@@ -84,6 +96,7 @@ final class PhoneSync {
         guard let model, !running, !model.isSample else { return }
         let all = Set(model.folders.map(\.id))
         let folders = model.openFolders()
+        watch(folders)
         guard !folders.isEmpty else {
             // None of the folders can be opened, which the lists that sync through them say
             model.synced(unreadable: all)
@@ -111,58 +124,93 @@ final class PhoneSync {
                 model.noticed(there.cards, listed: there.ids, in: folder.id)
             }
         }
+        let downloading = await files.askedForDownloads()
         running = false
         if runAgain {
             runAgain = false
             run()
+        } else if downloading {
+            downloadsComing()
         }
     }
+
+    // MARK: When a folder changes
+
+    /// Asks iOS to say when something changes in each of these folders, and stops asking about any other. Only while
+    /// YANA is open: a pass run as it goes to the background doesn't ask.
+    private func watch(_ folders: [OpenFolder]) {
+        guard started else { return }
+        for (id, presenter) in presenters where !folders.contains(where: { $0.id == id && $0.url == presenter.url }) {
+            NSFileCoordinator.removeFilePresenter(presenter)
+            presenters[id] = nil
+        }
+        for folder in folders where presenters[folder.id] == nil {
+            let presenter = FolderPresenter(folder.url) { [weak self] in
+                Task { @MainActor in self?.folderChanged() }
+            }
+            NSFileCoordinator.addFilePresenter(presenter)
+            presenters[folder.id] = presenter
+        }
+    }
+
+    /// Something changed in a sync folder: syncs in a moment, once for a burst of changes
+    private func folderChanged() {
+        guard started, changeSoon == nil else { return }
+        let wait = changesGathered
+        changeSoon = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            // Stopped meanwhile, as YANA went to the background
+            guard let self, !Task.isCancelled else { return }
+            self.changeSoon = nil
+            if self.started { self.run() }
+        }
+    }
+
+    /// iCloud Drive is bringing a file down, and may not say when it's here: syncs again in a few seconds
+    private func downloadsComing() {
+        guard started, downloadSoon == nil else { return }
+        let wait = downloadsCheckedEvery
+        downloadSoon = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            // Stopped meanwhile, as YANA went to the background
+            guard let self, !Task.isCancelled else { return }
+            self.downloadSoon = nil
+            if self.started { self.run() }
+        }
+    }
+
+    // MARK: Starting and stopping a list
 
     /// Stops syncing a list on this iPhone: writes its copy without tasks and without this iPhone in its devices, so the
     /// other devices hear that it no longer comes here. They keep the list.
     func leave(_ note: Note) {
         guard let model, let sync = note.sync,
               let folder = model.openFolders().first(where: { $0.id == sync.folder }),
-              var copy = SyncedList(note.syncable, device: model.device) else { return }
-        written[note.id] = nil
-        copy.items = []
-        copy.devices.removeAll { $0 == model.device }
-        copy.devicesChanged = Date()
+              let copy = SyncedList(note.syncable, device: model.device)?.leaving(at: Date()) else { return }
+        engine.forget(note.id)
         model.remember(left: note.id, at: copy.devicesChanged)
         let file = folder.copy(of: note.id, by: model.device)
-        let last = copy
-        Task { await files.write(last, to: file) }
+        Task { await files.write(copy, to: file) }
     }
 
-    // MARK: A folder's lists
+    // MARK: A folder's lists and devices, for the screens that show them
 
     /// The lists in a sync folder that other devices have and this iPhone doesn't, by name
     func lists(in folder: OpenFolder) async -> [FolderList] {
         guard let model else { return [] }
         let found = await files.read([folder])
         let cards = await files.devices(in: folder)
+        if await files.askedForDownloads() { downloadsComing() }
         let names = Dictionary(cards.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
-        let here = Set(model.lists.map(\.id))
-        let now = Date()
-        var lists: [FolderList] = []
-        for (id, copies) in found[folder.id] ?? [:] where !here.contains(id) {
-            guard let merged = elsewhere(copies, me: model.device, now: now) else { continue }
-            let note = Note(id: id, kind: .list, items: merged.items, name: merged.name)
-            lists.append(FolderList(id: id, title: note.title, tasks: merged.items.count,
-                                    devices: merged.devices.compactMap { names[$0] }))
-        }
-        return lists.sorted { ($0.title, $0.id.uuidString) < ($1.title, $1.id.uuidString) }
+        return engine.lists(in: found[folder.id] ?? [:], here: Set(model.lists.map(\.id)), names: names, now: Date())
     }
 
-    /// A list's copies merged, if other devices still sync it and it doesn't come to this iPhone
-    private func elsewhere(_ copies: [SyncedList], me: String, now: Date) -> SyncedList? {
-        let others = copies.filter { $0.device != me }
-        guard !others.isEmpty else { return nil }
-        // This iPhone's copy counts when there is one, as it does for a list sent here
-        let mine = copies.first { $0.device == me } ?? SyncedList(device: me)
-        let merged = SyncMerge.merge([mine] + others, now: now)
-        guard !merged.devices.isEmpty, !merged.devices.contains(me) else { return nil }
-        return merged
+    /// The devices that use a sync folder, newest first
+    func devices(in folder: OpenFolder) async -> [DeviceCard] {
+        let cards = await files.devices(in: folder)
+        // A screen showing them looks again after the sync that follows, when a card was still on its way
+        if await files.askedForDownloads() { downloadsComing() }
+        return cards
     }
 
     /// Brings lists in a sync folder to this iPhone. It joins the devices each list goes to, the same as if it had
@@ -172,95 +220,88 @@ final class PhoneSync {
         let found = await files.read([folder])
         let now = Date()
         for id in ids where !model.lists.contains(where: { $0.id == id }) {
-            guard let merged = elsewhere(found[folder.id]?[id] ?? [], me: model.device, now: now) else { continue }
-            // Later than the change it follows, even if the other device's clock is ahead of this iPhone's
-            let changed = max(now, merged.devicesChanged.addingTimeInterval(1))
-            let sync = SyncInfo(folder: folder.id, devices: merged.devices + [model.device], devicesChanged: changed,
-                                orderChanged: merged.orderChanged, deleted: merged.deleted,
-                                nameChanged: merged.nameChanged)
-            written[id] = nil
+            guard let note = engine.joining(id, from: found[folder.id]?[id] ?? [], in: folder.id, now: now) else {
+                continue
+            }
             model.forget(left: id)
-            model.addSynced(Note(id: id, kind: .list, items: merged.items, name: merged.name, sync: sync))
+            model.addSynced(note)
         }
         await flush()
     }
 
     /// Merges what was read from the folders into the lists, and gives back this iPhone's copies to write and delete
-    private func merge(_ found: [String: [UUID: [SyncedList]]], folders: [OpenFolder])
+    private func merge(_ found: FoundLists, folders: [OpenFolder])
         -> (writes: [(copy: SyncedList, file: URL)], deletes: [URL]) {
         guard let model else { return ([], []) }
         let me = model.device
-        let now = Date()
-        var writes: [(copy: SyncedList, file: URL)] = []
-        var deletes: [URL] = []
-
-        for local in model.lists {
-            guard let sync = local.sync, let folder = folders.first(where: { $0.id == sync.folder }),
-                  let lists = found[folder.id], let mine = SyncedList(local.syncable, device: me) else { continue }
-            let copies = lists[local.id] ?? []
-            let others = copies.filter { $0.device != me }
-            let merged = SyncMerge.merge([mine] + others, now: now)
-            let file = folder.copy(of: local.id, by: me)
-
-            // Another device took this iPhone off the list
-            if !merged.devices.contains(me) {
-                written[local.id] = nil
-                model.removeSynced(local.id)
-                deletes.append(file)
-                continue
-            }
-
-            // The other devices' changes, with the empty tasks just opened here kept where they are
-            var result = local.adopting(merged)
-            result.items = local.items.showing(merged.items)
-            if result != local {
-                model.showSynced(result)
-            }
-
-            // This iPhone's copy is written whenever the folder doesn't have it as it is now. One just written may not
-            // have been read back yet, or couldn't be written, so it's given a while before it's written again.
-            let onDisk = copies.first { $0.device == me }
-            guard onDisk != merged else { continue }
-            if let last = written[local.id], last.copy == merged, now.timeIntervalSince(last.at) < writeSettles {
-                continue
-            }
-            written[local.id] = (merged, now)
-            writes.append((merged, file))
+        let changes = engine.run(lists: model.lists.filter { $0.sync != nil }, here: Set(model.lists.map(\.id)),
+                                 folders: folders.map(\.id), found: found, left: model.left, now: Date())
+        // Another device took this iPhone off these
+        for id in changes.removed {
+            model.removeSynced(id)
+        }
+        for merged in changes.merged {
+            model.showSynced(merged.note)
+        }
+        for note in changes.added {
+            model.forget(left: note.id)
+            model.addSynced(note)
         }
 
-        // Lists sent here from another device
-        let here = Set(model.lists.map(\.id))
-        for folder in folders {
-            for (id, copies) in found[folder.id] ?? [:] where !here.contains(id) {
-                let others = copies.filter { $0.device != me }
-                guard !others.isEmpty else { continue }
-                // This iPhone's own copy counts when there is one. After the list was deleted here, it's what says the
-                // list no longer comes here, until the other devices have heard and say so too.
-                let mine = copies.first { $0.device == me }
-                let merged = SyncMerge.merge([mine ?? SyncedList(device: me)] + others, now: now)
-                guard merged.devices.contains(me) else { continue }
-                if let when = model.left[id], merged.devicesChanged <= when {
-                    // A copy written before it left landed after the one saying it left: say so again
-                    if let mine, mine.devices.contains(me) {
-                        var copy = mine
-                        copy.items = []
-                        copy.devices.removeAll { $0 == me }
-                        copy.devicesChanged = when
-                        writes.append((copy, folder.copy(of: id, by: me)))
-                    }
-                    continue
-                }
-                model.forget(left: id)
-                let sync = SyncInfo(folder: folder.id, devices: merged.devices, devicesChanged: merged.devicesChanged,
-                                    orderChanged: merged.orderChanged, deleted: merged.deleted,
-                                    nameChanged: merged.nameChanged)
-                model.addSynced(Note(id: id, kind: .list, items: merged.items, name: merged.name, sync: sync))
-                if mine != merged {
-                    written[id] = (merged, now)
-                    writes.append((merged, folder.copy(of: id, by: me)))
-                }
-            }
+        let places = Dictionary(folders.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var writes: [(copy: SyncedList, file: URL)] = []
+        for write in changes.writes {
+            guard let folder = places[write.folder] else { continue }
+            writes.append((copy: write.copy, file: folder.copy(of: write.list, by: me)))
+        }
+        var deletes: [URL] = []
+        for delete in changes.deletes {
+            guard let folder = places[delete.folder] else { continue }
+            deletes.append(folder.copy(of: delete.list, by: me))
         }
         return (writes, deletes)
+    }
+}
+
+/// Hears from iOS when something changes in a sync folder, or in a folder inside it, and says so. iOS tells an app
+/// that presents a folder about the changes other apps make to it with file coordination, which is how iCloud Drive
+/// brings in a file from another device.
+final class FolderPresenter: NSObject, NSFilePresenter {
+    let url: URL
+    private let changed: @Sendable () -> Void
+    private let queue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
+
+    init(_ url: URL, changed: @escaping @Sendable () -> Void) {
+        self.url = url
+        self.changed = changed
+        super.init()
+    }
+
+    var presentedItemURL: URL? { url }
+    var presentedItemOperationQueue: OperationQueue { queue }
+
+    func presentedItemDidChange() {
+        changed()
+    }
+
+    func presentedSubitemDidAppear(at url: URL) {
+        changed()
+    }
+
+    func presentedSubitemDidChange(at url: URL) {
+        changed()
+    }
+
+    func presentedSubitem(at oldURL: URL, didMoveTo newURL: URL) {
+        changed()
+    }
+
+    func accommodatePresentedSubitemDeletion(at url: URL, completionHandler: @escaping (Error?) -> Void) {
+        completionHandler(nil)
+        changed()
     }
 }

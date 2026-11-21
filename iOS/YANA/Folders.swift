@@ -9,24 +9,9 @@ struct PhoneFolder: Codable, Equatable, Identifiable, Sendable {
     var bookmark: Data
 }
 
-/// A sync folder, opened: its id on this iPhone and where it is. It's laid out the same as on the Mac (see
-/// SyncFormat.swift).
-struct OpenFolder: Equatable, Sendable {
+/// A sync folder, opened: its id on this iPhone and where it is. It's laid out the same as on the Mac, so where
+/// things are in it comes from `SyncFolderLayout` (SyncPass.swift), which the Mac's folders use too.
+struct OpenFolder: Equatable, Sendable, SyncFolderLayout {
     var id: String
     var url: URL
-
-    var devicesFolder: URL { url.appendingPathComponent("devices", isDirectory: true) }
-    var listsFolder: URL { url.appendingPathComponent("lists", isDirectory: true) }
-
-    func listFolder(_ list: UUID) -> URL {
-        listsFolder.appendingPathComponent(list.uuidString, isDirectory: true)
-    }
-
-    func copy(of list: UUID, by device: String) -> URL {
-        listFolder(list).appendingPathComponent(device + ".json")
-    }
-
-    func card(of device: String) -> URL {
-        devicesFolder.appendingPathComponent(device + ".json")
-    }
 }

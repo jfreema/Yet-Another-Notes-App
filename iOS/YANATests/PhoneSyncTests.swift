@@ -45,6 +45,22 @@ struct PhoneSyncTests {
         model.list(list)?.items.map(\.text) ?? []
     }
 
+    /// Waits for something that happens a moment later, for up to 20 seconds
+    func until(_ what: Comment, _ done: () -> Bool) async throws {
+        let giveUp = Date().addingTimeInterval(20)
+        while !done() && Date() < giveUp {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(done(), what)
+    }
+
+    /// What a list's tasks say in the file the lists are saved in, as YANA would find them the next time it opens
+    func saved(_ list: UUID) throws -> [String] {
+        let again = AppModel(storage: root.appendingPathComponent("Lists.json"),
+                             defaults: try #require(UserDefaults(suiteName: "YANATests-" + UUID().uuidString)))
+        return again.list(list)?.items.map(\.text) ?? []
+    }
+
     /// A list the Mac sends to this iPhone: Milk, and Eggs checked off
     func sentFromMac() async throws -> (list: UUID, milk: UUID, eggs: UUID) {
         let list = UUID()
@@ -214,6 +230,98 @@ struct PhoneSyncTests {
         let again = AppModel(storage: root.appendingPathComponent("Lists.json"),
                              defaults: try #require(UserDefaults(suiteName: "YANATests-" + UUID().uuidString)))
         #expect(again.list(sent.list)?.items.map(\.text) == ["Milk", "Eggs"])
+    }
+
+    // MARK: Saving and syncing when there's something to save or sync
+
+    @Test func typingIsSavedOnceItPauses() async throws {
+        let id = model.newList()
+        model.add("Milk", to: id)
+        let milk = try #require(model.list(id)?.items.first?.id)
+        #expect(try saved(id) == ["Milk"])
+
+        // A character typed shows at once, but the lists aren't written out again for each one
+        _ = model.enter("Milk,", in: milk, of: id)
+        _ = model.enter("Milk, 2%", in: milk, of: id)
+        #expect(texts(id) == ["Milk, 2%"])
+        #expect(model.unsaved)
+        #expect(try saved(id) == ["Milk"])
+        // They are once the typing pauses
+        try await until("what was typed is saved") { !model.unsaved }
+        #expect(try saved(id) == ["Milk, 2%"])
+
+        // And without a pause, by Return, which goes on to a new task
+        _ = model.enter("Milk, 2%!", in: milk, of: id)
+        #expect(model.unsaved)
+        _ = model.enter("Milk, 2%!\n", in: milk, of: id)
+        #expect(!model.unsaved)
+        #expect(try saved(id) == ["Milk, 2%!"])
+
+        // And by any other change, like checking a task off
+        _ = model.enter("Whole milk", in: milk, of: id)
+        #expect(model.unsaved)
+        model.toggle(milk, in: id)
+        #expect(!model.unsaved)
+        #expect(try saved(id) == ["Whole milk"])
+    }
+
+    @Test func whatsTypedInASyncedListStillGoesToTheFolder() async throws {
+        let sent = try await sentFromMac()
+        _ = model.enter("Milk, 2%", in: sent.milk, of: sent.list)
+        #expect(model.unsaved)
+        // The sync a moment after the typing saves it and writes this iPhone's copy
+        try await until("what was typed is saved") { !model.unsaved }
+        await model.sync.flush()
+        #expect(try saved(sent.list) == ["Milk, 2%", "Eggs"])
+        #expect(try myCopy(of: sent.list).items.map(\.text) == ["Milk, 2%", "Eggs"])
+    }
+
+    @Test func syncsWhenSomethingChangesInTheFolder() async throws {
+        let sent = try await sentFromMac()
+        // Open, with the look it takes by the clock an hour away, so only the folder saying it changed can bring a
+        // change in
+        model.sync.readEvery = 3600
+        model.sync.changesGathered = 0.1
+        let before = model.syncPasses
+        model.sync.start()
+        defer { model.sync.stop() }
+        try await until("it syncs as it opens") { model.syncPasses > before && !model.sync.running }
+
+        // The Mac's change arrives the way iCloud Drive brings one in, with file coordination
+        let now = Date()
+        let oat = try SyncedList(device: mac,
+                                 items: [ToDo(id: sent.milk, text: "Oat milk", changed: now),
+                                         ToDo(id: sent.eggs, text: "Eggs", done: true, changed: earlier)],
+                                 orderChanged: earlier, devices: [mac, model.device], devicesChanged: earlier).encoded()
+        let written = PhoneFiles.coordinatedWrite(oat, to: folder.copy(of: sent.list, by: mac))
+        #expect(written)
+        try await until("the Mac's change shows here") { texts(sent.list) == ["Oat milk", "Eggs"] }
+
+        // Closed, it stops listening. The sync as it closes is the last.
+        model.sync.stop()
+        await model.sync.flush()
+        let soy = try SyncedList(device: mac,
+                                 items: [ToDo(id: sent.milk, text: "Soy milk", changed: now.addingTimeInterval(1)),
+                                         ToDo(id: sent.eggs, text: "Eggs", done: true, changed: earlier)],
+                                 orderChanged: earlier, devices: [mac, model.device], devicesChanged: earlier).encoded()
+        let writtenAgain = PhoneFiles.coordinatedWrite(soy, to: folder.copy(of: sent.list, by: mac))
+        #expect(writtenAgain)
+        try await Task.sleep(for: .seconds(1))
+        #expect(texts(sent.list) == ["Oat milk", "Eggs"])
+        // Until it's opened again
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Soy milk", "Eggs"])
+    }
+
+    @Test func aScreenShowingAFolderLooksAgainAfterEachSync() async throws {
+        await model.sync.flush()
+        let before = model.syncPasses
+        await model.sync.flush()
+        #expect(model.syncPasses == before + 1)
+        // Not after one that couldn't read the folder
+        try FileManager.default.removeItem(at: folder.url)
+        await model.sync.flush()
+        #expect(model.syncPasses == before + 1)
     }
 
     // MARK: Recently Deleted, and Undo

@@ -4,6 +4,13 @@ import Foundation
 /// the first tab. Deleted notes and lists are kept beside it for 30 days, in Recently Deleted.json.
 struct NoteStore {
     let folder: URL
+    /// What Notes.json held when this store last read or wrote it, so a save that changes nothing is told apart
+    /// without reading the file back
+    private let last = Last()
+
+    private final class Last {
+        var data: Data?
+    }
 
     init(folder: URL = NoteStore.defaultFolder) {
         self.folder = folder
@@ -22,7 +29,10 @@ struct NoteStore {
         if let data = try? Data(contentsOf: file) {
             do {
                 let notes = try JSONDecoder().decode([Note].self, from: data)
-                if !notes.isEmpty { return notes }
+                if !notes.isEmpty {
+                    last.data = data
+                    return notes
+                }
             } catch {
                 // Keeps a copy, since the next save writes over it
                 logger.error("Couldn't read the notes: \(error.localizedDescription, privacy: .public)")
@@ -39,9 +49,10 @@ struct NoteStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         do {
             let data = try encoder.encode(notes)
-            guard data != (try? Data(contentsOf: file)) else { return }
+            guard data != last.data else { return }
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try data.write(to: file, options: .atomic)
+            last.data = data
         } catch {
             logger.error("Couldn't save the notes: \(error.localizedDescription, privacy: .public)")
         }

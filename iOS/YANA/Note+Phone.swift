@@ -11,16 +11,9 @@ enum NextFocus: Equatable {
 }
 
 /// What editing a list on the iPhone does to it. These are plain changes to the list; `AppModel.change` stamps them
-/// with the change times a synced list keeps.
+/// with the change times a synced list keeps. A list is saved and synced without its empty tasks (`Note.syncable`,
+/// in SyncPass.swift), as on the Mac.
 extension Note {
-    /// The list as it's saved and synced: without empty tasks, which are ones just opened to type in. The Mac doesn't
-    /// save or sync those either.
-    var syncable: Note {
-        var note = self
-        note.items = items.filter { !$0.isBlank }
-        return note
-    }
-
     /// The list after a change made here, given `old`, the list before it. A synced list gets change times like the
     /// Mac gives it (`stamped(since:at:)`), with empty tasks left where they are and not counted.
     func stamped(after old: Note, at now: Date) -> Note {
