@@ -1,11 +1,12 @@
 name: App Store review (temporary)
 
-# TEMPORARY, on this branch only: looks at the iPhone app's App Store version and its review. Not for main.
+# TEMPORARY, on this branch only: looks at the iPhone app's App Store version and its review, and does what
+# .github/scripts/asc_mode.txt says (see asc_review.py). Not for main.
 
 on:
   push:
     branches: [claude/project-thread-7c1x2i]
-    paths: [.github/scripts/asc_review.py, .github/scripts/asc_description.txt, .github/workflows/asc-review.yml]
+    paths: [.github/scripts/**, .github/workflows/asc-review.yml]
 
 permissions:
   contents: read

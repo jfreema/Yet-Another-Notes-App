@@ -1,6 +1,7 @@
 """Temporary, on the thread's branch only. Looks at YANA for iPhone's App Store version and its review through the App
-Store Connect API. With "swap <build number>" it puts that build in the review in place of the one there: it cancels
-the submission that's waiting, sets the build, and submits again. It prints ids, states and numbers only."""
+Store Connect API. What it does is the one line in asc_mode.txt: "show" only looks, "notes" puts asc_review_notes.txt
+in the version's App Review notes, and "prepare <build number>" also makes that build the version's. It never cancels
+or submits a review. It prints ids, states and numbers only."""
 import json, os, sys, time
 import jwt, requests
 
@@ -8,8 +9,6 @@ APP = "6837471903"
 API = "https://api.appstoreconnect.apple.com/v1"
 EDITABLE = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY",
             "READY_FOR_REVIEW"}
-IN_REVIEW = {"WAITING_FOR_REVIEW", "IN_REVIEW"}
-OPEN = {"WAITING_FOR_REVIEW", "IN_REVIEW", "UNRESOLVED_ISSUES"}
 
 
 def headers():
@@ -96,95 +95,60 @@ def show():
               "uploaded", a.get("uploadedDate"), "encryption", a.get("usesNonExemptEncryption"))
 
 
-def swap(number):
+def notes(version):
+    """Puts asc_review_notes.txt in the version's App Review notes. Never prints the review details, which hold the
+    contact's name, phone and email."""
+    text = open(os.path.join(os.path.dirname(__file__), "asc_review_notes.txt"), encoding="utf-8").read().strip()
+    if len(text) > 4000:
+        sys.exit(f"The notes are {len(text)} characters, and 4000 is the most")
+    detail = call("GET", f"/appStoreVersions/{version}/appStoreReviewDetail?fields[appStoreReviewDetails]=notes")["data"]
+    if (detail["attributes"].get("notes") or "").strip() == text:
+        print("review notes already as wanted,", len(text), "characters")
+        return
+    call("PATCH", f"/appStoreReviewDetails/{detail['id']}", {"data": {
+        "type": "appStoreReviewDetails", "id": detail["id"], "attributes": {"notes": text}}})
+    print("review notes updated,", len(text), "characters")
+
+
+def editable():
+    live = [(v, b) for v, b in versions() if state(v) in EDITABLE]
+    if len(live) != 1:
+        sys.exit(f"Expected one editable version, found {[(v['id'], state(v)) for v, _ in versions()]}."
+                 " Nothing was changed")
+    return live[0]
+
+
+def prepare(number):
+    """Sets the editable version's build and its review notes. It cancels and submits nothing."""
     found = [(b, pre) for b, pre in builds(number) if b["attributes"].get("version") == number]
     if not found:
-        sys.exit(f"There is no build {number} yet")
+        sys.exit(f"There is no build {number} yet. Nothing was changed")
     build, pre = found[0]
     a = build["attributes"]
     print("build", build["id"], a.get("version"), "of", pre, a.get("processingState"), "expired", a.get("expired"))
     if a.get("processingState") != "VALID" or a.get("expired"):
-        sys.exit("That build isn't ready, so nothing was changed")
-
-    live = [(v, b) for v, b in versions() if state(v) in EDITABLE | IN_REVIEW]
-    if len(live) != 1:
-        sys.exit(f"Expected one version that's editable or in review, found {[(v['id'], state(v)) for v, _ in live]}."
-                 " Nothing was changed")
-    version, current = live[0]
+        sys.exit("That build isn't ready. Nothing was changed")
+    version, current = editable()
     if version["attributes"].get("versionString") != pre:
         sys.exit(f"The build is of {pre} and the version is {version['attributes'].get('versionString')}."
                  " Nothing was changed")
     print("version", version["id"], version["attributes"].get("versionString"), state(version), "has build",
           current and current["attributes"].get("version"))
-    if current and current["id"] == build["id"] and state(version) in IN_REVIEW:
-        print("That build is already the one in review")
-        return
-
-    for s, _ in submissions():
-        if s["attributes"].get("state") in OPEN:
-            print("cancelling submission", s["id"], s["attributes"].get("state"))
-            call("PATCH", f"/reviewSubmissions/{s['id']}", {"data": {
-                "type": "reviewSubmissions", "id": s["id"], "attributes": {"canceled": True}}})
-
-    for _ in range(40):
-        version = next(v for v, _ in versions() if v["id"] == version["id"])
-        states = [s["attributes"].get("state") for s, _ in submissions()]
-        print("  version", state(version), "submissions", states)
-        if state(version) in EDITABLE and not any(s in OPEN | {"CANCELING"} for s in states):
-            break
-        time.sleep(15)
+    if current and current["id"] == build["id"]:
+        print("that build is already the version's")
     else:
-        sys.exit("The version didn't become editable after the cancel. Run this again to carry on")
-
-    call("PATCH", f"/appStoreVersions/{version['id']}/relationships/build",
-         {"data": {"type": "builds", "id": build["id"]}})
-    print("build set")
-    describe(version["id"])
-
-    ready = [(s, items) for s, items in submissions() if s["attributes"].get("state") == "READY_FOR_REVIEW"]
-    if ready:
-        submission, items = ready[0]
-        print("using submission", submission["id"], "items", [(i["id"], i["attributes"].get("state")) for i in items])
-    else:
-        submission = call("POST", "/reviewSubmissions", {"data": {
-            "type": "reviewSubmissions", "attributes": {"platform": "IOS"},
-            "relationships": {"app": {"data": {"type": "apps", "id": APP}}}}})["data"]
-        items = []
-        print("new submission", submission["id"])
-    if not items:
-        call("POST", "/reviewSubmissionItems", {"data": {
-            "type": "reviewSubmissionItems",
-            "relationships": {
-                "reviewSubmission": {"data": {"type": "reviewSubmissions", "id": submission["id"]}},
-                "appStoreVersion": {"data": {"type": "appStoreVersions", "id": version["id"]}}}}})
-        print("version added to the submission")
-    for attempt in range(10):
-        try:
-            call("PATCH", f"/reviewSubmissions/{submission['id']}", {"data": {
-                "type": "reviewSubmissions", "id": submission["id"], "attributes": {"submitted": True}}}, soft=True)
-            break
-        except Refused as refused:
-            print("  not yet:", refused)
-            time.sleep(20)
-    else:
-        sys.exit("It couldn't be submitted. Run this again to carry on")
-    print("submitted")
-    time.sleep(10)
+        call("PATCH", f"/appStoreVersions/{version['id']}/relationships/build",
+             {"data": {"type": "builds", "id": build["id"]}})
+        print("build set")
+    notes(version["id"])
 
 
-def describe(version):
-    """Puts the listing's description in step with asc_description.txt, if that file is here"""
-    path = os.path.join(os.path.dirname(__file__), "asc_description.txt")
-    if not os.path.exists(path):
-        return
-    text = open(path, encoding="utf-8").read().strip()
-    for loc in call("GET", f"/appStoreVersions/{version}/appStoreVersionLocalizations")["data"]:
-        if loc["attributes"].get("locale") == "en-US" and (loc["attributes"].get("description") or "").strip() != text:
-            call("PATCH", f"/appStoreVersionLocalizations/{loc['id']}", {"data": {
-                "type": "appStoreVersionLocalizations", "id": loc["id"], "attributes": {"description": text}}})
-            print("description updated,", len(text), "characters")
-
-
-if len(sys.argv) > 2 and sys.argv[1] == "swap":
-    swap(sys.argv[2])
+mode = open(os.path.join(os.path.dirname(__file__), "asc_mode.txt"), encoding="utf-8").read().split()
+print("mode", mode)
+if mode[:1] == ["notes"]:
+    notes(editable()[0]["id"])
+elif mode[:1] == ["prepare"] and len(mode) == 2:
+    prepare(mode[1])
+elif mode != ["show"]:
+    sys.exit("asc_mode.txt should say show, notes, or prepare <build number>")
 show()

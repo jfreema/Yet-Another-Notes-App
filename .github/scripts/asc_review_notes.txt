@@ -1,0 +1,23 @@
+YANA for iPhone is the companion to YANA for Mac, a free menu bar notes and to-do list app (https://github.com/jfreema/Yet-Another-Notes-App). This answers the request for information under Guideline 2.1. The screen recording is attached to App Review Information.
+
+1. SCREEN RECORDING
+Attached. It was made on an iPhone and starts with launching YANA. It shows the Lists screen, starting a list with +, typing tasks, checking one off, dragging tasks into order, swiping one away and tapping Undo, the list's menu, Settings and Add Sync Folder (picking a folder in the Files picker), and a list's Sync Settings. YANA has no accounts and no sign-in, no content shared with other people, and no paid content or In-App Purchases.
+
+2. PURPOSE AND AUDIENCE
+YANA is a simple to-do list app. It is for people who keep to-do lists in YANA on their Mac and want the same lists on their iPhone, and for anyone who wants a plain, numbered checklist. It solves this problem: lists made on the Mac are otherwise only on the Mac. With YANA on the iPhone you can check tasks off, edit them, add new ones and reorder them, and the changes show up on the Mac a few seconds later, and the other way round. It also works on its own, with no Mac.
+
+3. SETTING UP AND USING IT
+No account, login or sample file is needed.
+- Tap + on the Lists screen to start a list. Type a task and press Return to start the next one. Tap a circle to check a task off. Tap a task to edit it. Touch and hold a task to drag it into order. Swipe a task left to delete it, and tap Undo to put it back. The list's menu (the button with three dots) has Rename, Clear Checked, Sync This List and Delete.
+- A deleted list stays in Recently Deleted, at the bottom of the Lists screen, for 30 days.
+- To try syncing on one device: tap the gear, then Add Sync Folder, and pick or create any folder in the Files picker, for example in iCloud Drive. Then open a list, open its menu, tap Sync This List, and tap Sync. The list's file appears in that folder, under lists.
+- With YANA for Mac using the same folder, that list appears on the Mac. Lists the Mac syncs through the folder show on the iPhone under Bring Lists Here after the folder is added, each with a switch to bring it over. A second iPhone with YANA that adds the same folder works the same way.
+
+4. EXTERNAL SERVICES
+None. YANA has no server, no analytics, no ads, no authentication, no payments and no AI services, and it makes no network connections of its own. Lists are stored on the device. Syncing reads and writes files in a folder the user picks with the system Files picker. If that folder is in iCloud Drive, the user's own iCloud Drive carries the files between their devices.
+
+5. REGIONAL DIFFERENCES
+None. YANA works the same way in every region.
+
+6. REGULATED INDUSTRIES AND THIRD-PARTY MATERIAL
+Not applicable. YANA is not in a regulated industry and contains no third-party material.
