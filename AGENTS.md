@@ -34,13 +34,13 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 | The tab strip | `TabBar` |
 | A text tab, and how tabs look (`Look`: font and colors, sticky or not) | `Pages` |
 | A text tab's line numbers (an `NSRulerView`) | `LineNumbers` |
-| A to-do list tab, its rows, their numbers, and dragging them | `TodoList` |
+| A to-do list tab, its rows, their numbers, wrapping a long task, and dragging them | `TodoList` |
 | What a tab holds, and the change times a synced list keeps (`Note.stamped`) | `Note` |
 | Syncing lists: what's in a sync folder, and merging copies (shared with YANA for iPhone) | `SyncFormat` |
 | Syncing lists: the sync folders this Mac uses, this Mac's id | `SyncModel` |
-| Syncing lists: reading the folders every few seconds, merging, and adding or taking away tabs | `ListSync` |
+| Syncing lists: reading the folders every few seconds, merging, adding or taking away tabs, whether each list is syncing, a folder's lists to bring here, and noticing a new device | `ListSync` |
 | Sync This List…: the folder and the devices a list goes to | `SyncSheet` |
-| Saving the notes to `Notes.json` | `NoteStore` |
+| Saving the notes to `Notes.json`, and Recently Deleted | `NoteStore` |
 | Check for Updates | `Updater` |
 
 ## Things that bite
@@ -58,8 +58,23 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 - **Clear Checked** is a row under the add-a-task row, shown only while some tasks are checked (`TodoList.clearChecked`,
   also in the **…** menu). It registers an undo that puts the tasks back at their old places in the stack.
 - **Deleting a task waits a turn** (`perform(_:with:afterDelay:)`), since its × or text is still handling the event.
-- **Converting a note to a list swaps the tab's page** and registers an undo that swaps it back. That's why
-  `select(_:keepingUndo:)` exists: selecting a tab otherwise clears the undo stack, which would wipe the redo.
+  `TodoList.delete` then registers the same undo as Clear Checked. A task emptied to delete it comes back as it was
+  when its editing began (`ToDoRow.textBefore`), and one that never had anything in it just goes.
+- **A task's text wraps** (`TaskField`). Its `intrinsicContentSize` is the height its cell needs at the width it has,
+  so a task's height follows from a layout pass that gave it a width, and settles on the pass after. Tests lay out
+  more than once for that. While a task is edited, a copy of the cell measures what's in the field editor, so the
+  editing isn't touched. The checkbox and number stay on the first line: `TaskField.fit(_:beside:)` pins the
+  checkbox's middle to the text's first baseline, less half a capital's height (`firstLineCenter`).
+- **Each tab has its own Undo** (`NotePage.undo`), so going to another tab loses none of it. The window gets the
+  selected tab's from `windowWillReturnUndoManager`, a text tab's text view from `undoManager(for:)`, and a list
+  overrides `undoManager`, which is what a task's field editor finds. **Converting a note to a list swaps the tab's
+  page** and hands its Undo to the new page, with an undo that swaps it back. Deleting a tab clears its Undo, which
+  otherwise holds on to the page.
+- **Recently Deleted** is `Recently Deleted.json` beside `Notes.json` (`NoteStore.keepDeleted`). It gets a deleted
+  tab's note or list, a list another device took off this Mac, and a tab replaced by an opened file. They're kept 30
+  days, 50 at most, and the old ones go when it's read. Putting one back gives it a new id and no sync.
+  `NoteWindowController.discard` is deleting without the alert, which is what the tests call: `show()` and alerts need
+  the app running, so the tests stay clear of them.
 - **A text file opens as a list when it reads like one** (`Note.opened(fromText:file:)`): every line with something
   on it starts `[ ] ` or `[x] `, which is how `plainText` writes a list. Anything else opens as a note, so a file is
   never rewritten in another shape by Save. Converting a note to a list is looser (`tasks(fromText:)` takes any line).
@@ -117,6 +132,18 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   service may keep dates only to the second.
 - **Sync Settings says when each device was last heard from**: the modification date of its copy of the list, which
   it writes whenever it has a change to pass on. It's the first thing to look at when two Macs don't agree.
+- **A tab says when its list has stopped syncing.** `ListSync.state(of:)` is `.stopped` for a list whose folder
+  couldn't be read on the last pass, or isn't one of this Mac's folders any more. The tab bar then shows an orange
+  warning in place of the sync mark, with when it last synced, and `SyncHost.syncStateChanged` refreshes the tabs.
+  When each folder was last read is kept in UserDefaults (`syncLastRead`), saved about once a minute.
+- **Add Sync Folder shows the lists in the folder** that other devices sync and this Mac doesn't have
+  (`ListSync.lists(in:)`), and `join` brings the ticked ones here: this Mac adds itself to their devices, with a
+  `devicesChanged` later than the latest one, the same as ticking it on another device. Picking a folder YANA already
+  uses shows them again, which is also how a list whose tab was deleted comes back.
+- **A device that starts using a folder is noticed** by comparing the folder's device cards with the ones seen before
+  (`syncKnownDevices` in UserDefaults, looked at every 30 seconds). The first look at a folder only remembers who's
+  there. The window offers the new device the lists that sync through the folder (`SyncHost.offer`) the next time the
+  note is showing with no sheet over it, so YANA never opens by itself.
 
 ## YANA for iPhone
 
@@ -156,6 +183,9 @@ setup and user guide.
 ## Releasing
 
 Every change users get raises `CFBundleShortVersionString` in `Resources/Info.plist`: the last number for fixes, the
-middle one for a new feature. Pushing that to main runs the Release workflow, which builds, signs, notarizes and
-commits `downloads/YANA.zip` and `downloads/latest.json`, where Check for Updates looks. Leave `downloads/` to the
-workflow. Signing is in [docs/signing.md](docs/signing.md).
+middle one for a new feature. Pushing that to main runs the Release workflow, which builds, signs and notarizes, then
+publishes the zipped app as a GitHub Release (`v<version>`, with `YANA.zip` attached) and commits
+`downloads/latest.json`, where Check for Updates looks. Its `url` is the release's zip, and every version of YANA
+downloads whatever `url` says, so older ones keep updating. The README's Download link goes to the latest release's
+`YANA.zip`. Leave `downloads/` to the workflow. The zip isn't committed any more: it was before 1.9, and those copies
+are still in the history. Signing is in [docs/signing.md](docs/signing.md).

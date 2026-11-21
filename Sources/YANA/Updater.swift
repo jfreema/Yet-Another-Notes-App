@@ -2,14 +2,16 @@ import AppKit
 import CryptoKit
 import Security
 
-/// Updates from the zipped app in the repo's downloads folder, replacing this copy in place
+/// Updates from the zipped app that downloads/latest.json on main points to, replacing this copy in place. Since 1.9
+/// that's the YANA.zip attached to the version's GitHub Release. Before, it was a copy committed beside latest.json.
+/// Every version follows the address in latest.json, so older ones update the same way.
 @MainActor
 final class Updater {
     private(set) var isBusy = false
 
     static let homepage = URL(string: "https://github.com/jfreema/Yet-Another-Notes-App")!
 
-    /// What build.sh --release publishes next to the zipped app
+    /// What build.sh --release writes to downloads/latest.json
     struct Release: Decodable, Equatable, Sendable {
         let version: String
         let url: URL

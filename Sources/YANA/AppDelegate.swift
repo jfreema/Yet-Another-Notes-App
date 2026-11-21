@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let note = NoteWindowController()
     private let updater = Updater()
     private lazy var statusMenu = makeMenu()
+    /// The notes and lists deleted in the last 30 days, filled in as it opens
+    private let deletedMenu = NSMenu(title: "Recently Deleted")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenu.make(target: self)
@@ -64,6 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Rename Note…", #selector(rename), tag: Tag.rename))
         menu.addItem(item("Convert to To-Do List", #selector(convertToList)))
         menu.addItem(item("Clear Checked Tasks", #selector(clearChecked)))
+        let deleted = NSMenuItem(title: "Recently Deleted", action: nil, keyEquivalent: "")
+        deletedMenu.delegate = self
+        deleted.submenu = deletedMenu
+        menu.addItem(deleted)
         menu.addItem(.separator())
         menu.addItem(item("Sync This List…", #selector(syncList), tag: Tag.sync))
         menu.addItem(item("Add Sync Folder…", #selector(addSyncFolder)))
@@ -98,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu !== deletedMenu else { return fillDeletedMenu() }
         menu.item(withTag: Tag.pinned)?.state = note.isPinned ? .on : .off
         menu.item(withTag: Tag.sticky)?.state = note.isSticky ? .on : .off
         // Names the file Save writes to, once the tab has one
@@ -175,6 +182,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func rename() { note.rename() }
     @objc func convertToList() { note.convertToList() }
     @objc func clearChecked() { note.clearChecked() }
+
+    // MARK: Recently Deleted, from the … menu
+
+    /// A deleted note or list to a line, latest first, each saying when it was deleted. Choosing one puts it back.
+    private func fillDeletedMenu() {
+        deletedMenu.removeAllItems()
+        let deleted = note.recentlyDeleted
+        guard !deleted.isEmpty else {
+            let none = NSMenuItem(title: "Nothing deleted in the last 30 days", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            deletedMenu.addItem(none)
+            return
+        }
+        deletedMenu.addItem(.sectionHeader(title: "Put Back"))
+        for entry in deleted {
+            let list = entry.note.kind == .list
+            let title = entry.note.title
+            let line = item(title.count > 40 ? String(title.prefix(40)) + "…" : title, #selector(putBack(_:)))
+            line.representedObject = entry.note.id
+            line.image = NSImage(systemSymbolName: list ? "checklist" : "note.text",
+                                 accessibilityDescription: list ? "To-do list" : "Note")
+            let when = "Deleted \(min(entry.deleted, Date()).formatted(.relative(presentation: .named)))"
+            line.toolTip = when
+            if #available(macOS 14.4, *) { line.subtitle = when }
+            deletedMenu.addItem(line)
+        }
+        deletedMenu.addItem(.separator())
+        deletedMenu.addItem(item("Delete All Now…", #selector(emptyRecentlyDeleted)))
+    }
+
+    @objc func putBack(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        note.show()
+        if !note.putBack(id) {
+            Alert.show("There's no room to put it back",
+                       "YANA holds up to \(Note.limit) notes. Delete a tab, then choose this again in Recently Deleted.")
+        }
+    }
+
+    @objc func emptyRecentlyDeleted() {
+        let count = note.recentlyDeleted.count
+        guard count > 0, Alert.confirm("Delete everything in Recently Deleted now?",
+                                       count == 1 ? "The one thing in it can't be put back after this."
+                                           : "The \(count) notes and lists in it can't be put back after this.",
+                                       button: "Delete", cancel: "Cancel") else { return }
+        note.emptyRecentlyDeleted()
+    }
 
     // MARK: Syncing, from the … menu
 

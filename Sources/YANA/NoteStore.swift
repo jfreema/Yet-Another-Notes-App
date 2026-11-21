@@ -1,7 +1,7 @@
 import Foundation
 
 /// The notes, in ~/Library/Application Support/YANA/Notes.json. YANA 1.0 kept a single note in Note.txt, which becomes
-/// the first tab.
+/// the first tab. Deleted notes and lists are kept beside it for 30 days, in Recently Deleted.json.
 struct NoteStore {
     let folder: URL
 
@@ -45,5 +45,57 @@ struct NoteStore {
         } catch {
             logger.error("Couldn't save the notes: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    // MARK: Recently Deleted
+
+    /// A note or list whose tab was deleted, and when
+    struct DeletedNote: Codable, Equatable {
+        var note: Note
+        var deleted: Date
+    }
+
+    /// How long a deleted note or list can still be put back
+    static let deletedKept: TimeInterval = 30 * 24 * 60 * 60
+    /// The most that are kept. Past it, the ones deleted longest ago go first.
+    static let deletedLimit = 50
+
+    var deletedFile: URL { folder.appendingPathComponent("Recently Deleted.json") }
+
+    /// What was deleted in the last 30 days, latest first. Anything older is gone for good from now on.
+    func loadDeleted(now: Date = Date()) -> [DeletedNote] {
+        guard let data = try? Data(contentsOf: deletedFile),
+              let all = try? JSONDecoder().decode([DeletedNote].self, from: data) else { return [] }
+        let kept = all.filter { now.timeIntervalSince($0.deleted) < Self.deletedKept }
+            .sorted { $0.deleted > $1.deleted }
+        if kept != all { saveDeleted(kept) }
+        return kept
+    }
+
+    func saveDeleted(_ deleted: [DeletedNote]) {
+        do {
+            guard !deleted.isEmpty else {
+                if FileManager.default.fileExists(atPath: deletedFile.path) {
+                    try FileManager.default.removeItem(at: deletedFile)
+                }
+                return
+            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try encoder.encode(deleted).write(to: deletedFile, options: .atomic)
+        } catch {
+            logger.error("Couldn't save Recently Deleted: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Keeps a note or list whose tab is being deleted, unless there's nothing in it. A synced list is kept as this
+    /// Mac had it, and doesn't sync when it's put back.
+    func keepDeleted(_ note: Note, at now: Date = Date()) {
+        guard !note.isEmpty else { return }
+        var note = note
+        note.sync = nil
+        let deleted = [DeletedNote(note: note, deleted: now)] + loadDeleted(now: now)
+        saveDeleted(Array(deleted.prefix(Self.deletedLimit)))
     }
 }

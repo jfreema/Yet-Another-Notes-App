@@ -17,6 +17,8 @@ final class SyncSheet: NSObject {
     private var shownDevices: Set<String> = []
     private let list: UUID
     private let current: SyncInfo?
+    /// When the list last synced, if it has stopped
+    private let lastSynced: Date?
     private var onChoice: ((Choice?) -> Void)?
     private weak var parent: NSWindow?
     /// The folder picked before Choose Another Folder…, to go back to if that's cancelled
@@ -26,9 +28,10 @@ final class SyncSheet: NSObject {
     private static let chooseTag = -2
     private static let width: CGFloat = 340
 
-    init(listTitle: String, list: UUID, current: SyncInfo?) {
+    init(listTitle: String, list: UUID, current: SyncInfo?, lastSynced: Date? = nil) {
         self.list = list
         self.current = current
+        self.lastSynced = lastSynced
         super.init()
 
         let heading = NSTextField(labelWithString: current == nil ? "Sync “\(listTitle)”"
@@ -194,7 +197,11 @@ final class SyncSheet: NSObject {
 
         // Said here, since nothing else shows that a folder has stopped working
         if let folder = pickedFolder, !folder.canBeRead {
-            let warning = NSTextField(wrappingLabelWithString: "YANA can't open this folder, so nothing syncs through it. Check that it's still there, and that YANA is allowed to use it in System Settings › Privacy & Security › Files and Folders.")
+            var problem = "YANA can't open this folder, so nothing syncs through it. Check that it's still there, and that YANA is allowed to use it in System Settings › Privacy & Security › Files and Folders."
+            if let lastSynced, folder.id == current?.folder {
+                problem += " The list last synced \(min(lastSynced, Date()).formatted(.relative(presentation: .named)))."
+            }
+            let warning = NSTextField(wrappingLabelWithString: problem)
             warning.preferredMaxLayoutWidth = Self.width - 20
             warning.textColor = .systemRed
             warning.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -225,7 +232,7 @@ final class SyncSheet: NSObject {
             }
         }
         if cards.isEmpty {
-            let none = NSTextField(wrappingLabelWithString: "No other devices use this folder yet. On your other Mac, choose Add Sync Folder… in YANA's menu and pick this folder, and it shows up here.")
+            let none = NSTextField(wrappingLabelWithString: "No other devices use this folder yet. On your other Mac, choose Add Sync Folder… in YANA's menu and pick this folder. It shows up here, and YANA on it offers to bring this list over.")
             none.preferredMaxLayoutWidth = Self.width - 20
             none.textColor = .secondaryLabelColor
             none.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
