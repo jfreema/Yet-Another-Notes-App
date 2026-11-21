@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let note = NoteWindowController()
     private let updater = Updater()
+    private let hotKey = HotKey()
     private lazy var statusMenu = makeMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -22,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         note.menuProvider = { [unowned self] in self.statusMenu }
+
+        // The shortcut does what a click on the menu bar icon does
+        hotKey.action = { [unowned self] in self.note.toggle() }
+        hotKey.start()
 
         DistributedNotificationCenter.default().addObserver(forName: YANA.showNoteNotification, object: nil,
                                                             queue: .main) { [weak self] _ in
@@ -73,6 +78,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Save As…", #selector(saveTextFileAs)))
         menu.addItem(.separator())
         menu.addItem(item("Open at Login", #selector(toggleOpenAtLogin), tag: Tag.openAtLogin))
+        let shortcut = item("Show and Hide with \(HotKey.title)", #selector(toggleHotKey), tag: Tag.hotKey)
+        shortcut.toolTip = "Press Control-Option-N in any app to show the note, and again to put it away"
+        menu.addItem(shortcut)
         menu.addItem(.separator())
         menu.addItem(item("About YANA", #selector(showAbout)))
         menu.addItem(item("Check for Updates…", #selector(checkForUpdates)))
@@ -88,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         static let save = 4
         static let sync = 5
         static let rename = 6
+        static let hotKey = 7
     }
 
     private func item(_ title: String, _ action: Selector, key: String = "", tag: Int = 0) -> NSMenuItem {
@@ -106,6 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.item(withTag: Tag.sync)?.title = note.isSynced ? "Sync Settings for This List…" : "Sync This List…"
         menu.item(withTag: Tag.rename)?.title = note.isList ? "Rename List…" : "Rename Note…"
         menu.item(withTag: Tag.openAtLogin)?.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        // Unticked too when macOS turned the keys down, and choosing it then says so
+        menu.item(withTag: Tag.hotKey)?.state = hotKey.isRegistered ? .on : .off
     }
 
     @objc func showNote() {
@@ -131,6 +142,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             logger.error("Open at Login failed: \(error.localizedDescription, privacy: .public)")
             Alert.show("Couldn't change Open at Login", error.localizedDescription)
+        }
+    }
+
+    /// Turns the shortcut off, or on. Turning it on can fail: macOS turns down keys that it or another app has.
+    @objc func toggleHotKey() {
+        hotKey.isOn = !hotKey.isRegistered
+        if hotKey.isOn && !hotKey.isRegistered {
+            Alert.show("\(HotKey.title) isn't available",
+                       "macOS or another app already uses Control-Option-N as a shortcut, so YANA can't. "
+                       + "YANA asks for it again each time it opens.")
         }
     }
 
