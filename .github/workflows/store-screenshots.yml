@@ -1,0 +1,21 @@
+name: Upload App Store screenshots (temporary)
+
+# Temporary, on the thread's branch only: uploads screens-store/*.png to App Store Connect. Not for main.
+
+on:
+  push:
+    branches: [claude/project-thread-3dglkw]
+    paths: [.github/scripts/upload_screenshots.py, .github/workflows/store-screenshots.yml]
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install pyjwt cryptography requests
+      - run: python3 .github/scripts/upload_screenshots.py
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.ASC_KEY }}
