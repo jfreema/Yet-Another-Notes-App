@@ -70,9 +70,13 @@ jobs:
           xcodebuild test -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
             -parallel-testing-enabled NO 2>&1 | tee "$RUNNER_TEMP/test.log" | xcbeautify --renderer github-actions
 
-      - name: Show the end of the test log
+      - name: Show what failed, and the end of the test log
         if: failure()
-        run: tail -n 150 "$RUNNER_TEMP/test.log" || true
+        run: |
+          # Where each failure was, and what was on screen then, which a UI test puts in its message
+          grep -n -A 80 ' error: ' "$RUNNER_TEMP/test.log" | cut -c 1-240 | head -n 400 || true
+          echo "----- The end of the log -----"
+          tail -n 150 "$RUNNER_TEMP/test.log" || true
 
       - name: Build for iPhone
         run: |
