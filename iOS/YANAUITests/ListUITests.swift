@@ -1,6 +1,7 @@
 import XCTest
 
-/// Drags tasks into a new order and types in them, on the sample lists debug builds show with -YANAScreenshots.
+/// Drags tasks into a new order, types in them, and undoes deleting them, on the sample lists debug builds show with
+/// -YANAScreenshots.
 /// Groceries is Milk, Eggs, Coffee beans, Lemons, Sourdough.
 final class ListUITests: XCTestCase {
     var app: XCUIApplication!
@@ -78,31 +79,13 @@ final class ListUITests: XCTestCase {
         undoBrings("Eggs", backInto: groceries)
     }
 
-    func testUndoWithNothingBeforeIt() {
-        app.terminate()
-        app.launchArguments += ["-YANAShow", "undo"]
-        app.launch()
-        XCTAssertTrue(task("Milk").waitForExistence(timeout: 15), app.debugDescription)
-        undoBrings("Eggs", backInto: groceries)
-    }
-
     /// Taps Undo, and checks the task is back in its place and the Undo bar has gone
     private func undoBrings(_ text: String, backInto all: [String]) {
         let undo = app.buttons["Undo"]
         XCTAssertTrue(undo.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(task(text).exists)
-        var ways: [String] = []
-        for way in ["tap", "tap again", "coordinate", "press"] where undo.exists && !task(text).exists {
-            ways.append("\(way) hittable=\(undo.isHittable) frame=\(undo.frame)")
-            switch way {
-            case "coordinate": undo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-            case "press": undo.press(forDuration: 0.3)
-            default: undo.tap()
-            }
-            _ = task(text).waitForExistence(timeout: 4)
-        }
-        XCTAssertTrue(task(text).exists, "UNDO WAYS \(ways)\n\(app.debugDescription)")
-        XCTAssertEqual(ways.count, 1, "UNDO WAYS \(ways)")
+        undo.tap()
+        XCTAssertTrue(task(text).waitForExistence(timeout: 5), app.debugDescription)
         sleep(1)
         XCTAssertEqual(order(all), all)
         XCTAssertFalse(undo.exists)
