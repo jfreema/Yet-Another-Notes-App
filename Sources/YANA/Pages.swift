@@ -16,6 +16,8 @@ protocol NotePage: AnyObject {
     var file: URL? { get set }
     /// Called after every change
     var onChange: (() -> Void)? { get set }
+    /// Its own Undo, which stays with it while another tab is shown
+    var undo: UndoManager { get set }
     /// Puts the cursor where you'd start typing
     func focus()
     func apply(_ look: Look)
@@ -76,6 +78,7 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
     var sync: SyncInfo?
     var file: URL?
     var onChange: (() -> Void)?
+    var undo = UndoManager()
 
     init(text: String) {
         let scroll = NSTextView.scrollableTextView()
@@ -118,5 +121,10 @@ final class TextPage: NSObject, NotePage, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         onChange?()
+    }
+
+    /// Typing is undone by the tab's own Undo, not the window's
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        undo
     }
 }

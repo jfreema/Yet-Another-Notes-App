@@ -1,8 +1,10 @@
 name: Release
 
 # Tests, builds, signs and checks YANA. When a push to main changes Resources/Info.plist to a new version, it also
-# publishes it: commits downloads/YANA.zip, downloads/latest.json and the README's version line to main, which is where
-# Check for Updates looks. Pull requests and manual runs build without publishing, unless a manual run asks to.
+# publishes it: the zipped app goes out as a GitHub Release (v<version>, with YANA.zip attached), and
+# downloads/latest.json and the README's version line are committed to main. Check for Updates reads latest.json there,
+# and downloads the zip it points to. Pull requests and manual runs build without publishing, unless a manual run asks
+# to.
 
 on:
   push:
@@ -115,11 +117,48 @@ jobs:
 
       - name: Publish
         if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # The zip goes out as a GitHub Release, so the repository doesn't grow by a copy of the app with each version.
+          # If an earlier try got as far as making the release, its zip is replaced by this build's, which is the one
+          # latest.json describes.
+          tag="v$VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" downloads/YANA.zip --clobber
+          else
+            gh release create "$tag" downloads/YANA.zip --target "$GITHUB_SHA" --title "YANA $VERSION" \
+              --notes "YANA $VERSION for macOS 14 or later, on Apple silicon or Intel. Unzip YANA.zip, drag YANA.app into Applications and open it. If YANA is already installed, Check for Updates… in its menu installs this version in place."
+          fi
+
+          # Before latest.json says so on main: the address in it has to give this very zip, since that's what Check
+          # for Updates downloads, on this version and every earlier one. A new release can take a moment to be served.
+          url="$(plutil -extract url raw -o - downloads/latest.json)"
+          sha="$(plutil -extract sha256 raw -o - downloads/latest.json)"
+          served=""
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL "$url" -o "$RUNNER_TEMP/published.zip" \
+              && [[ "$(shasum -a 256 "$RUNNER_TEMP/published.zip" | cut -d' ' -f1)" == "$sha" ]]; then
+              served=yes
+              break
+            fi
+            sleep 10
+          done
+          if [[ -z "$served" ]]; then
+            echo "::error::$url doesn't give the zip that downloads/latest.json describes"
+            exit 1
+          fi
+
           git config user.name "jfreema"
           git config user.email "143004867+jfreema@users.noreply.github.com"
-          git add downloads/YANA.zip downloads/latest.json README.md
-          git commit -m "Release ${{ steps.version.outputs.version }}"
+          # Releases before 1.9 committed the zip here, and the README linked to that copy. The first release made
+          # this way takes the copy off main and points the README at the latest release, in the same commit that
+          # points latest.json at the release. After that, these two lines find nothing to do.
+          git rm -qf --ignore-unmatch downloads/YANA.zip
+          sed -i '' 's#/raw/main/downloads/YANA.zip#/releases/latest/download/YANA.zip#' README.md
+          git add downloads/latest.json README.md
+          git commit -m "Release $VERSION"
           git pull --rebase origin main
           git push origin HEAD:main
 

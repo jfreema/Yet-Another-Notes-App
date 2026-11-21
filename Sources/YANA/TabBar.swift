@@ -2,6 +2,7 @@ import AppKit
 
 /// The note window's tabs, one per note, shown once there's more than one or the only one has a name. Double-click a tab
 /// to rename it, or right-click it to rename it, make a note a to-do list, sync a list with other devices, or delete it.
+/// A synced list has a sync mark, which turns into an orange warning when its sync folder can't be read.
 @MainActor
 final class TabBar: NSView {
     var onSelect: ((Int) -> Void)?
@@ -15,6 +16,10 @@ final class TabBar: NSView {
     private static let syncedImage = NSImage(systemSymbolName: "arrow.triangle.2.circlepath",
                                              accessibilityDescription: "Synced to-do list")?
         .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular))
+    private static let stoppedImage = NSImage(systemSymbolName: "exclamationmark.arrow.triangle.2.circlepath",
+                                              accessibilityDescription: "Synced to-do list that isn't syncing")?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.systemOrange])))
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -36,7 +41,8 @@ final class TabBar: NSView {
         fatalError("init(coder:) is not used")
     }
 
-    func show(_ notes: [Note], selected: Int) {
+    /// Shows a tab for each note. `sync` says, for each, whether it's syncing: nil for one that doesn't sync.
+    func show(_ notes: [Note], selected: Int, sync: [SyncState?] = []) {
         var buttons = stack.arrangedSubviews.compactMap { $0 as? TabButton }
         while buttons.count < notes.count {
             let button = makeButton()
@@ -49,8 +55,14 @@ final class TabBar: NSView {
         for (index, (button, note)) in zip(buttons, notes).enumerated() {
             button.tag = index
             button.title = note.title
-            button.toolTip = note.sync == nil ? note.title : "\(note.title) (synced)"
-            button.image = note.kind == .list ? (note.sync == nil ? Self.listImage : Self.syncedImage) : nil
+            let problem = (index < sync.count ? sync[index] : nil)?.problem()
+            if let problem {
+                button.toolTip = "\(note.title): \(problem)"
+                button.image = Self.stoppedImage
+            } else {
+                button.toolTip = note.sync == nil ? note.title : "\(note.title) (synced)"
+                button.image = note.kind == .list ? (note.sync == nil ? Self.listImage : Self.syncedImage) : nil
+            }
             button.imagePosition = note.kind == .list ? .imageLeading : .noImage
             button.state = index == selected ? .on : .off
             if let items = button.menu?.items, items.count == 4 {

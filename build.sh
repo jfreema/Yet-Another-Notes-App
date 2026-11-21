@@ -3,7 +3,8 @@
 #   (nothing)   build/YANA.app for this Mac
 #   --install   also replace /Applications/YANA.app and open it
 #   --release   universal build, signed and notarized when it can be, zipped to downloads/YANA.zip with
-#               downloads/latest.json for Check for Updates
+#               downloads/latest.json for Check for Updates. The Release workflow publishes the zip as a GitHub
+#               Release and commits latest.json. The zip itself isn't committed.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -128,7 +129,7 @@ fi
 
 if [[ "$MODE" == "--release" ]]; then
     VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Resources/Info.plist)"
-    # Fixed name keeps the README's download link stable
+    # Always the same name, so the README's link to the latest release's YANA.zip keeps working
     ZIP="downloads/$NAME.zip"
     mkdir -p downloads
     rm -f "$ZIP"
@@ -137,11 +138,12 @@ if [[ "$MODE" == "--release" ]]; then
     # Left out when signed ad hoc, since plutil can't read a JSON null
     TEAM_LINE=""
     [[ -n "$TEAM" ]] && TEAM_LINE="  \"team\": \"$TEAM\","
-    # What Check for Updates reads. The hash lets it reject a stale or broken download.
+    # What Check for Updates reads, from main. The address is the zip attached to this version's GitHub Release, and
+    # the hash lets it reject a stale or broken download.
     cat > downloads/latest.json <<JSON
 {
   "version": "$VERSION",
-  "url": "https://github.com/jfreema/Yet-Another-Notes-App/raw/main/downloads/$NAME.zip",
+  "url": "https://github.com/jfreema/Yet-Another-Notes-App/releases/download/v$VERSION/$NAME.zip",
   "sha256": "$(shasum -a 256 "$ZIP" | cut -d' ' -f1)",
 $TEAM_LINE
   "notarized": $NOTARIZED

@@ -2,7 +2,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// The note window: up to four tabs of notes and to-do lists, plus any lists synced here from other devices. Closing it
-/// hides it to the menu bar.
+/// hides it to the menu bar. Each tab has its own Undo, and a deleted tab's note or list can be put back for 30 days.
 @MainActor
 final class NoteWindowController: NSObject, NSWindowDelegate {
     let window: NSWindow
@@ -16,9 +16,11 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     private let pinButton = NSButton()
     private let menuButton = NSButton()
     private let opacitySlider = NSSlider()
-    private let store = NoteStore()
+    private let store: NoteStore
     private let listSync = ListSync()
     private var syncSheet: SyncSheet?
+    /// Devices that have started using a sync folder, to offer its lists to once the note is showing
+    private var offers: [(device: DeviceCard, folder: SyncFolder)] = []
     private var saveTimer: Timer?
     /// The status item's menu, also under the note's … button
     var menuProvider: (() -> NSMenu)?
@@ -56,7 +58,9 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
 
     var count: Int { pages.count }
 
-    override init() {
+    /// The tests keep their notes somewhere else
+    init(store: NoteStore = NoteStore()) {
+        self.store = store
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 304, height: 440),
                           styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         super.init()
@@ -147,6 +151,7 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         pages[selected].focus()
         // What other devices changed while the note was hidden shows now
         listSync.run()
+        showOffersSoon()
     }
 
     func hide() {
@@ -168,6 +173,15 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         listSync.run()
     }
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        showOffersSoon()
+    }
+
+    /// Each tab keeps its own Undo, so going to another tab and back loses none of it
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? {
+        pages.indices.contains(selected) ? pages[selected].undo : nil
+    }
+
     // MARK: Tabs
 
     func newNote(_ kind: Note.Kind) {
@@ -182,10 +196,6 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     }
 
     func select(_ index: Int) {
-        select(index, keepingUndo: false)
-    }
-
-    private func select(_ index: Int, keepingUndo: Bool) {
         guard pages.indices.contains(index) else { return }
         selected = index
         UserDefaults.standard.set(index, forKey: Key.selected)
@@ -200,8 +210,6 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
                 view.leadingAnchor.constraint(equalTo: pageArea.leadingAnchor),
                 view.trailingAnchor.constraint(equalTo: pageArea.trailingAnchor),
             ])
-            // Undo stays with the tab it's for
-            if !keepingUndo { window.undoManager?.removeAllActions() }
         }
         updateTabs()
         if window.isVisible { pages[index].focus() }
@@ -212,20 +220,72 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         guard pages.count > 1, pages.indices.contains(index) else { return }
         let page = pages[index]
         let note = page.note
+        let kept = "Recently Deleted, in the … menu, for 30 days"
         if note.sync != nil {
             guard Alert.confirm("Delete “\(note.title)” from this Mac?",
-                                "It stops syncing here, and stays on your other devices.", button: "Delete",
-                                cancel: "Cancel") else { return }
-            listSync.stop(page)
+                                "It stops syncing here, and stays on your other devices. This Mac's copy goes to \(kept).",
+                                button: "Delete", cancel: "Cancel") else { return }
         } else if !note.isEmpty {
             let what = note.kind == .list ? "to-do list" : "note"
-            guard Alert.confirm("Delete “\(note.title)”?", "The \(what) can't be brought back.", button: "Delete",
+            guard Alert.confirm("Delete “\(note.title)”?", "The \(what) goes to \(kept).", button: "Delete",
                                 cancel: "Cancel") else { return }
         }
-        guard let index = pages.firstIndex(where: { $0 === page }) else { return }
+        discard(page)
+    }
+
+    /// Takes a tab away, without asking. What was in it goes to Recently Deleted, and a synced list stops syncing here.
+    func discard(_ page: NotePage) {
+        guard pages.count > 1, let index = pages.firstIndex(where: { $0 === page }) else { return }
+        let note = page.note
+        if note.sync != nil { listSync.stop(page) }
+        store.keepDeleted(note)
+        // Its Undo holds on to it
+        page.undo.removeAllActions()
         pages.remove(at: index)
         select(index < selected ? selected - 1 : min(selected, pages.count - 1))
         save()
+    }
+
+    // MARK: Recently Deleted
+
+    /// The notes and lists deleted in the last 30 days, latest first
+    var recentlyDeleted: [NoteStore.DeletedNote] { store.loadDeleted() }
+
+    /// Puts a deleted note or list back: in place of the tab you're on if that's an empty note, else in a new tab. It
+    /// comes back as it was, except that a list which synced doesn't any more. False when there's no room for it.
+    @discardableResult
+    func putBack(_ id: UUID) -> Bool {
+        var deleted = store.loadDeleted()
+        guard let index = deleted.firstIndex(where: { $0.note.id == id }) else { return false }
+        var note = deleted[index].note
+        // A new id, so a list that used to sync isn't taken for the one still in its sync folder
+        note.id = UUID()
+        note.sync = nil
+        // A file that's open in another tab by now stays that tab's
+        if let file = note.file?.standardizedFileURL,
+           pages.contains(where: { $0.file?.standardizedFileURL == file }) {
+            note.file = nil
+        }
+        let current = pages[selected].note
+        if current.kind == .text && current.isEmpty {
+            pages[selected].undo.removeAllActions()
+            pages[selected] = makePage(note)
+            select(selected)
+        } else if pages.count < Note.limit {
+            pages.append(makePage(note))
+            select(pages.count - 1)
+        } else {
+            return false
+        }
+        deleted.remove(at: index)
+        store.saveDeleted(deleted)
+        save()
+        return true
+    }
+
+    /// Deletes everything in Recently Deleted for good
+    func emptyRecentlyDeleted() {
+        store.saveDeleted([])
     }
 
     // MARK: Naming
@@ -272,17 +332,15 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func setName(_ name: String?, of page: NotePage) {
+    func setName(_ name: String?, of page: NotePage) {
         let old = page.name
         guard name != old, pages.contains(where: { $0 === page }) else { return }
         page.name = name
         noteChanged()
-        if let undo = window.undoManager {
-            undo.registerUndo(withTarget: self) { controller in
-                MainActor.assumeIsolated { controller.setName(old, of: page) }
-            }
-            undo.setActionName("Rename")
+        page.undo.registerUndo(withTarget: self) { controller in
+            MainActor.assumeIsolated { controller.setName(old, of: page) }
         }
+        page.undo.setActionName("Rename")
     }
 
     // MARK: Converting
@@ -299,7 +357,12 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
             return
         }
         show()
-        let page = pages[index]
+        convertToList(pages[index])
+    }
+
+    /// Turns a note's tab into a to-do list, whether or not the note is showing
+    func convertToList(_ page: NotePage) {
+        guard page.note.kind == .text else { return }
         replace(page, with: makePage(page.note.asList), actionName: "Convert to To-Do List")
     }
 
@@ -318,21 +381,21 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         list.clearChecked()
     }
 
-    /// Puts one tab's page in place of another, and lets Undo and Redo swap them back
+    /// Puts one tab's page in place of another, and lets Undo and Redo swap them back. The tab's Undo goes with it, so
+    /// what was done before the swap can still be undone after it.
     private func replace(_ page: NotePage, with replacement: NotePage, actionName: String) {
         guard let index = pages.firstIndex(where: { $0 === page }) else { return }
+        replacement.undo = page.undo
         pages[index] = replacement
         // Text size or sticky note mode may have changed since an undone page was last shown
         replacement.apply(look)
-        select(index, keepingUndo: true)
-        if let undo = window.undoManager {
-            undo.registerUndo(withTarget: self) { controller in
-                MainActor.assumeIsolated {
-                    controller.replace(replacement, with: page, actionName: actionName)
-                }
+        select(index)
+        replacement.undo.registerUndo(withTarget: self) { controller in
+            MainActor.assumeIsolated {
+                controller.replace(replacement, with: page, actionName: actionName)
             }
-            undo.setActionName(actionName)
         }
+        replacement.undo.setActionName(actionName)
         save()
     }
 
@@ -354,8 +417,10 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         show()
         select(index)
         let page = pages[index]
+        var lastSynced: Date?
+        if case .stopped(_, let last)? = listSync.state(of: page) { lastSynced = last }
         // Kept until the next one, since its own button is still finishing when it reports back
-        let sheet = SyncSheet(listTitle: page.note.title, list: page.id, current: page.sync)
+        let sheet = SyncSheet(listTitle: page.note.title, list: page.id, current: page.sync, lastSynced: lastSynced)
         syncSheet = sheet
         sheet.begin(for: window) { [weak self] choice in
             guard let self else { return }
@@ -376,7 +441,8 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Add Sync Folder…: a folder other devices sync lists through, so they can send them here
+    /// Add Sync Folder…: a folder other devices sync lists through, so they can send them here. It then shows the lists
+    /// already in the folder, to bring here. Picking a folder YANA already uses shows them again.
     func addSyncFolder() {
         show()
         let panel = NSOpenPanel()
@@ -390,12 +456,116 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
             MainActor.assumeIsolated {
+                guard let self else { return }
                 do {
-                    _ = try self?.listSync.add(url)
+                    let folder = try self.listSync.add(url)
+                    Task { await self.showLists(in: folder) }
                 } catch {
                     Alert.show("Couldn't add “\(url.lastPathComponent)”", error.localizedDescription)
                 }
             }
+        }
+    }
+
+    /// The most lists or devices' lists offered at once, so the sheet fits on the screen
+    private static let offeredAtOnce = 10
+
+    /// After a sync folder is added: the lists in it that aren't on this Mac, each ticked to bring here
+    private func showLists(in folder: SyncFolder) async {
+        let lists = await listSync.lists(in: folder)
+        guard !lists.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "“\(folder.name)” is ready to sync through"
+            alert.informativeText = "No lists in it are waiting to come to this Mac. To send one from here, open the list and choose Sync This List…. Lists your other devices send to this Mac show up as tabs on their own."
+            alert.beginSheetModal(for: window) { _ in }
+            return
+        }
+        let shown = Array(lists.prefix(Self.offeredAtOnce))
+        var about = "These lists sync through the folder on your other devices. A ticked one gets a tab here and stays in sync with them."
+        if lists.count > shown.count {
+            about += " There are \(lists.count - shown.count) more: choose Add Sync Folder… and pick this folder again to see them."
+        }
+        choose("Bring lists from “\(folder.name)” to this Mac?", about, from: shown.map(\.summary),
+               button: "Bring Here") { [weak self] ticked in
+            guard let self, !ticked.isEmpty else { return }
+            let ids = ticked.map { shown[$0].id }
+            Task {
+                await self.listSync.join(ids, in: folder)
+                // Shows the first one brought over
+                if let index = self.pages.firstIndex(where: { ids.contains($0.id) }) { self.select(index) }
+            }
+        }
+    }
+
+    /// A sheet with a ticked checkbox for each of `titles`. Its first button gives back the ones left ticked, by their
+    /// place in `titles`. Not Now gives back nothing.
+    private func choose(_ message: String, _ about: String, from titles: [String], button: String,
+                        then: @escaping ([Int]) -> Void) {
+        let (alert, boxes) = Self.choice(message, about, from: titles, button: button)
+        alert.beginSheetModal(for: window) { response in
+            MainActor.assumeIsolated {
+                guard response == .alertFirstButtonReturn else { return then([]) }
+                then(boxes.indices.filter { boxes[$0].state == .on })
+            }
+        }
+    }
+
+    /// The alert `choose` shows, with its checkboxes in the order of `titles`
+    static func choice(_ message: String, _ about: String, from titles: [String],
+                       button: String) -> (alert: NSAlert, boxes: [NSButton]) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = about
+        let width: CGFloat = 260
+        let boxes = titles.map { title in
+            let box = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+            box.state = .on
+            // A long name is cut short, and shown whole when the mouse rests on it
+            box.lineBreakMode = .byTruncatingTail
+            box.toolTip = title
+            box.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return box
+        }
+        let stack = NSStackView(views: boxes)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        let height = boxes.reduce(0) { $0 + $1.intrinsicContentSize.height } + CGFloat(max(boxes.count - 1, 0)) * 6
+        stack.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        alert.accessoryView = stack
+        alert.addButton(withTitle: button)
+        alert.addButton(withTitle: "Not Now")
+        return (alert, boxes)
+    }
+
+    // MARK: A new device in a sync folder
+
+    private func showOffersSoon() {
+        guard !offers.isEmpty else { return }
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(showOffers), object: nil)
+        perform(#selector(showOffers), with: nil, afterDelay: 0)
+    }
+
+    /// Offers the next new device the lists that sync through its folder, once the note is showing with nothing over it
+    @objc private func showOffers() {
+        guard window.isVisible, window.attachedSheet == nil, !offers.isEmpty else { return }
+        let (device, folder) = offers.removeFirst()
+        // Only the lists that still don't go to it: it may have brought some over itself by now
+        let lists = Array(listSync.lists(notGoingTo: device.id, in: folder).prefix(Self.offeredAtOnce))
+        guard !lists.isEmpty else { return showOffersSoon() }
+        choose("“\(device.name)” now uses “\(folder.name)”",
+               "Send it the lists that sync through that folder? A ticked list shows up on it and stays in sync. Sync Settings for a list changes this later.",
+               from: lists.map { $0.note.title }, button: "Send") { [weak self] ticked in
+            guard let self else { return }
+            for page in ticked.map({ lists[$0] }) {
+                guard let sync = page.sync, self.pages.contains(where: { $0 === page }) else { continue }
+                self.listSync.send(page, to: sync.devices.filter { $0 != ThisDevice.id } + [device.id])
+            }
+            if !ticked.isEmpty {
+                self.updateTabs()
+                self.save()
+            }
+            self.showOffersSoon()
         }
     }
 
@@ -450,8 +620,10 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
             select(pages.count - 1)
         } else {
             guard Alert.confirm("Replace “\(current.title)” with “\(url.lastPathComponent)”?",
-                                "YANA holds up to \(Note.limit) notes. What's in this one can't be brought back.",
+                                "YANA holds up to \(Note.limit) notes. What's in this one goes to Recently Deleted, in the … menu, for 30 days.",
                                 button: "Replace", cancel: "Cancel") else { return }
+            store.keepDeleted(current)
+            pages[selected].undo.removeAllActions()
             pages[selected] = page
             select(selected)
         }
@@ -519,16 +691,22 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         return page
     }
 
-    /// Shows the tabs once there's more than one note, or once the only one has a name, so the name shows
+    /// Shows the tabs once there's more than one note, or once the only one has a name or has stopped syncing, so that
+    /// shows
     private func updateTabs() {
         let notes = pages.map { $0.note }
-        let showTabs = notes.count > 1 || notes.first?.name != nil
+        let sync = pages.map { listSync.state(of: $0) }
+        let stopped = sync.contains { state in
+            if case .stopped? = state { return true }
+            return false
+        }
+        let showTabs = notes.count > 1 || notes.first?.name != nil || stopped
         if tabBar.isHidden == showTabs {
             tabBar.isHidden = !showTabs
             (showTabs ? tabsHidden : tabsShown).isActive = false
             (showTabs ? tabsShown : tabsHidden).isActive = true
         }
-        tabBar.show(notes, selected: selected)
+        tabBar.show(notes, selected: selected, sync: sync)
         newButton.isEnabled = notes.count < Note.limit
         newButton.toolTip = newButton.isEnabled ? "New note or to-do list" : "YANA holds up to \(Note.limit) notes"
     }
@@ -702,6 +880,9 @@ extension NoteWindowController: SyncHost {
 
     func removeSynced(_ page: NotePage) {
         guard let index = pages.firstIndex(where: { $0 === page }) else { return }
+        // Another device took it off this Mac, so what this Mac had can still be put back
+        store.keepDeleted(page.note)
+        page.undo.removeAllActions()
         if pages.count == 1 {
             pages[0] = makePage(Note(kind: .text))
             select(0)
@@ -715,5 +896,15 @@ extension NoteWindowController: SyncHost {
             select(min(selected, pages.count - 1))
         }
         save()
+    }
+
+    func syncStateChanged() {
+        updateTabs()
+    }
+
+    func offer(_ device: DeviceCard, in folder: SyncFolder) {
+        guard !offers.contains(where: { $0.device.id == device.id && $0.folder.id == folder.id }) else { return }
+        offers.append((device, folder))
+        showOffersSoon()
     }
 }

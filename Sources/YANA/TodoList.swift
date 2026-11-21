@@ -2,8 +2,8 @@ import AppKit
 
 /// A to-do list. Type in the last row and press Return to add a task, or press Return in a task to add one below it.
 /// Checking a task crosses it out and shows a × that deletes it, and Clear Checked under the list deletes all the checked
-/// ones. Click a task to edit it, or drag it to move it. The tasks are numbered down the left side, like the lines of a
-/// text note.
+/// ones. Undo puts deleted tasks back. Click a task to edit it, or drag it to move it. A long task wraps onto as many
+/// lines as it needs. The tasks are numbered down the left side, like the lines of a text note.
 @MainActor
 final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     var id = UUID()
@@ -11,11 +11,16 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     var sync: SyncInfo?
     var file: URL?
     var onChange: (() -> Void)?
+    var undo = UndoManager()
     private let scroll = NSScrollView()
     private let stack = NSStackView()
-    private let addRow = NSStackView()
+    private let addRow = NSView()
     private let addButton = NSButton()
-    private let addField = NSTextField(string: "")
+    private let addField = TaskField.make()
+    /// How far in the row for adding a task starts, past the numbers
+    private lazy var addIndent = addButton.leadingAnchor.constraint(equalTo: addRow.leadingAnchor)
+    /// Keeps the + on the first line of what's being typed
+    private var addOnFirstLine: NSLayoutConstraint?
     /// Under the row for adding a task, while some tasks are checked
     private let clearRow = NSStackView()
     private let clearButton = NSButton()
@@ -71,22 +76,21 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         addButton.action = #selector(addClicked)
         Self.alignLeading(addButton)
 
-        addField.isBordered = false
-        addField.drawsBackground = false
-        addField.focusRingType = .none
-        addField.lineBreakMode = .byTruncatingTail
         addField.cell?.sendsActionOnEndEditing = false
         addField.target = self
         addField.action = #selector(addTask)
-        addField.setContentHuggingPriority(.init(1), for: .horizontal)
-        addField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        addRow.orientation = .horizontal
-        addRow.distribution = .fill
-        addRow.spacing = 4
-        addRow.edgeInsets = NSEdgeInsets(top: 1, left: 0, bottom: 1, right: 0)
-        addRow.addArrangedSubview(addButton)
-        addRow.addArrangedSubview(addField)
+        // Laid out like a task, so what's typed here wraps the way it will once it's one
+        for view in [addButton, addField] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addRow.addSubview(view)
+        }
+        addOnFirstLine = addField.fit(addRow, beside: addButton)
+        NSLayoutConstraint.activate([
+            addIndent,
+            addField.leadingAnchor.constraint(equalTo: addButton.trailingAnchor, constant: ToDoRow.spacing),
+            addField.trailingAnchor.constraint(equalTo: addRow.trailingAnchor),
+        ])
         arrange(addRow, at: 0)
 
         clearButton.isBordered = false
@@ -119,6 +123,9 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         // A task emptied while it's being edited is deleted when the editing ends, so it isn't kept
         Note(id: id, kind: .list, items: rows.map(\.item).filter { !$0.isBlank }, name: name, file: file, sync: sync)
     }
+
+    /// The list's own Undo, which is also what a task being edited uses
+    override var undoManager: UndoManager? { undo }
 
     /// Whether a task is being clicked or dragged, when changes from other devices wait for the mouse to come up
     var isDragging: Bool { tracking }
@@ -165,7 +172,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         }
         renumber()
         // Undo would put back rows that are gone
-        window?.undoManager?.removeAllActions(withTarget: self)
+        undo.removeAllActions(withTarget: self)
         if stoppedEditing { focus() }
     }
 
@@ -189,6 +196,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         addField.placeholderAttributedString = NSAttributedString(string: "Add a task", attributes: [
             .font: look.font, .foregroundColor: NSColor.placeholderTextColor,
         ])
+        addOnFirstLine?.constant = TaskField.firstLineCenter(look.font)
         rows.forEach { $0.apply(look) }
         renumber()
     }
@@ -205,7 +213,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         for (index, row) in tasks.enumerated() {
             row.number(index + 1, width: width, current: row === editing)
         }
-        addRow.edgeInsets.left = width + ToDoRow.gutterGap
+        addIndent.constant = width + ToDoRow.gutterGap
         clearRow.edgeInsets.left = width + ToDoRow.gutterGap
         updateClearButton()
     }
@@ -224,6 +232,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     /// Called when a task starts being edited
     func startedEditing(_ row: ToDoRow) {
         editing = row
+        row.textBefore = row.item.text
         renumber()
     }
 
@@ -283,12 +292,12 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         if let editing, checked.contains(where: { $0 === editing }) {
             window?.makeFirstResponder(nil)
         }
-        take(checked)
+        take(checked, as: "Clear Checked")
         focus()
     }
 
     /// Takes tasks out of the list, and lets Undo put them back
-    private func take(_ taken: [ToDoRow]) {
+    private func take(_ taken: [ToDoRow], as action: String) {
         let places = taken.compactMap { row in stack.arrangedSubviews.firstIndex(of: row).map { (row: row, index: $0) } }
         for row in taken {
             stack.removeArrangedSubview(row)
@@ -296,27 +305,23 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         }
         renumber()
         onChange?()
-        if let undo = window?.undoManager {
-            undo.registerUndo(withTarget: self) { list in
-                MainActor.assumeIsolated { list.putBack(places) }
-            }
-            undo.setActionName("Clear Checked")
+        undo.registerUndo(withTarget: self) { list in
+            MainActor.assumeIsolated { list.putBack(places, as: action) }
         }
+        undo.setActionName(action)
     }
 
     /// Puts taken tasks back where they were, top to bottom, and lets Redo take them again
-    private func putBack(_ places: [(row: ToDoRow, index: Int)]) {
+    private func putBack(_ places: [(row: ToDoRow, index: Int)], as action: String) {
         for place in places.sorted(by: { $0.index < $1.index }) {
             arrange(place.row, at: min(place.index, rows.count))
         }
         renumber()
         onChange?()
-        if let undo = window?.undoManager {
-            undo.registerUndo(withTarget: self) { list in
-                MainActor.assumeIsolated { list.take(places.map(\.row)) }
-            }
-            undo.setActionName("Clear Checked")
+        undo.registerUndo(withTarget: self) { list in
+            MainActor.assumeIsolated { list.take(places.map(\.row), as: action) }
         }
+        undo.setActionName(action)
     }
 
     /// Deletes a task once the event that asked for it is done, since the task's own button or text is still handling it
@@ -325,11 +330,26 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     }
 
     @objc private func removeNow(_ row: ToDoRow) {
+        delete(row)
+    }
+
+    /// Deletes a task. Undo puts it back where it was. One emptied to delete it comes back as it was before it was
+    /// emptied, and one that never had anything typed in it just goes.
+    func delete(_ row: ToDoRow) {
         guard row.superview === stack else { return }
-        stack.removeArrangedSubview(row)
-        row.removeFromSuperview()
-        renumber()
-        onChange?()
+        // One being edited finishes first, so its field editor isn't left behind
+        if editing === row { window?.makeFirstResponder(nil) }
+        if row.item.isBlank, let before = row.textBefore { row.item.text = before }
+        row.textBefore = nil
+        guard !row.item.isBlank else {
+            stack.removeArrangedSubview(row)
+            row.removeFromSuperview()
+            renumber()
+            onChange?()
+            return
+        }
+        row.refresh()
+        take([row], as: "Delete Task")
     }
 
     @objc private func focusLater() {
@@ -356,6 +376,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
             remove(row)
         } else {
             row.item.text = text
+            row.textBefore = nil
             row.refresh()
             onChange?()
         }
@@ -457,21 +478,31 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     }
 }
 
-/// One task: its number, a checkbox, its text, and a × once it's checked
+/// One task: its number, a checkbox, its text, and a × once it's checked. The text wraps, and the rest stays on its
+/// first line.
 @MainActor
 final class ToDoRow: NSView {
     var item: ToDo
     weak var list: TodoList?
-    let field = TaskField(string: "")
+    let field = TaskField.make()
+    let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    /// What it said when its editing began, which Undo brings back if it's emptied to delete it
+    var textBefore: String?
     private let numberLabel = NSTextField(labelWithString: "")
     private lazy var numberWidth = numberLabel.widthAnchor.constraint(equalToConstant: 0)
-    private let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let deleteButton = NSButton()
-    private let content = NSStackView()
+    /// The text runs to the ×, or to the row's edge when there isn't one
+    private lazy var toDelete = field.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor,
+                                                                constant: -Self.spacing)
+    private lazy var toEdge = field.trailingAnchor.constraint(equalTo: trailingAnchor)
+    /// Keeps the checkbox on the first line of the text
+    private var onFirstLine: NSLayoutConstraint?
     private var look: Look
 
     /// The space between the numbers' column and the checkboxes
     static let gutterGap: CGFloat = 4
+    /// The space between a checkbox, its task's text, and the ×
+    static let spacing: CGFloat = 4
 
     /// Highlights it while it's being dragged
     var isLifted = false {
@@ -491,15 +522,8 @@ final class ToDoRow: NSView {
         checkbox.action = #selector(toggled)
         TodoList.alignLeading(checkbox)
 
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.lineBreakMode = .byTruncatingTail
-        field.setContentHuggingPriority(.init(1), for: .horizontal)
-        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         field.onFocus = { [unowned self] in self.list?.startedEditing(self) }
 
-        numberLabel.translatesAutoresizingMaskIntoConstraints = false
         numberLabel.setAccessibilityElement(false)
 
         deleteButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Delete task")
@@ -511,26 +535,21 @@ final class ToDoRow: NSView {
         deleteButton.target = self
         deleteButton.action = #selector(deleteClicked)
 
-        content.orientation = .horizontal
-        content.distribution = .fill
-        content.spacing = 4
-        content.edgeInsets = NSEdgeInsets(top: 1, left: 0, bottom: 1, right: 0)
-        content.translatesAutoresizingMaskIntoConstraints = false
-        for view in [checkbox, field, deleteButton] {
-            content.addArrangedSubview(view)
+        for view in [numberLabel, checkbox, field, deleteButton] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
         }
-        addSubview(content)
-        addSubview(numberLabel)
+        onFirstLine = field.fit(self, beside: checkbox)
         NSLayoutConstraint.activate([
             numberLabel.leadingAnchor.constraint(equalTo: leadingAnchor),
             numberWidth,
-            // On the same line as the task's text, like a text note's line numbers
+            // On the same line as the start of the task's text, like a text note's line numbers
             numberLabel.firstBaselineAnchor.constraint(equalTo: field.firstBaselineAnchor),
-            content.topAnchor.constraint(equalTo: topAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor),
-            content.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor,
-                                             constant: Look.lineNumberMargin + Self.gutterGap),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            checkbox.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor,
+                                              constant: Look.lineNumberMargin + Self.gutterGap),
+            field.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: Self.spacing),
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            deleteButton.centerYAnchor.constraint(equalTo: checkbox.centerYAnchor),
         ])
         refresh()
     }
@@ -561,8 +580,16 @@ final class ToDoRow: NSView {
         checkbox.state = item.done ? .on : .off
         checkbox.setAccessibilityLabel(item.text)
         deleteButton.isHidden = !item.done
+        if item.done {
+            toEdge.isActive = false
+            toDelete.isActive = true
+        } else {
+            toDelete.isActive = false
+            toEdge.isActive = true
+        }
+        onFirstLine?.constant = TaskField.firstLineCenter(look.font)
         let style = NSMutableParagraphStyle()
-        style.lineBreakMode = .byTruncatingTail
+        style.lineBreakMode = .byWordWrapping
         var attributes: [NSAttributedString.Key: Any] = [
             .font: look.font,
             .foregroundColor: item.done ? look.doneColor : look.textColor,
@@ -575,13 +602,12 @@ final class ToDoRow: NSView {
         field.font = look.font
         field.textColor = look.textColor
         field.attributedStringValue = NSAttributedString(string: item.text, attributes: attributes)
-        field.toolTip = item.text
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         let hit = super.hitTest(point)
         // The text takes clicks only while it's being edited. Otherwise they come here, so the task can be dragged.
-        return hit === field || hit === content ? self : hit
+        return hit === field ? self : hit
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -599,15 +625,95 @@ final class ToDoRow: NSView {
     }
 }
 
-/// A task's text, which tells its row when you start editing it
+/// A task's text. It wraps onto as many lines as it needs, growing as you type, and tells its row when you start
+/// editing it.
 @MainActor
 final class TaskField: NSTextField {
     var onFocus: (() -> Void)?
+    /// The width its height was last worked out for
+    private var fittedWidth: CGFloat = -1
+
+    static func make() -> TaskField {
+        let field = TaskField(string: "")
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.usesSingleLineMode = false
+        field.lineBreakMode = .byWordWrapping
+        field.maximumNumberOfLines = 0
+        field.cell?.wraps = true
+        field.cell?.isScrollable = false
+        field.setContentHuggingPriority(.init(1), for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
 
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
         if became { onFocus?() }
         return became
+    }
+
+    /// As tall as its lines need at the width it has, which its row gives it. Before it has a width, it's one line.
+    override var intrinsicContentSize: NSSize {
+        let line = Self.lineHeight(font)
+        guard var cell, bounds.width > 0 else { return NSSize(width: NSView.noIntrinsicMetric, height: line) }
+        // While it's being edited, what's typed so far is in the field editor and not in the cell yet. A copy of the
+        // cell measures it, so the editing itself isn't touched.
+        if let editor = currentEditor(), let typed = cell.copy() as? NSCell {
+            typed.stringValue = editor.string
+            cell = typed
+        }
+        let needs = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: bounds.width, height: 100_000))
+        return NSSize(width: NSView.noIntrinsicMetric, height: max(ceil(needs.height), line))
+    }
+
+    override func layout() {
+        super.layout()
+        // The text wraps differently at another width, so it's another height
+        if bounds.width != fittedWidth {
+            fittedWidth = bounds.width
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    /// Grows and shrinks a line at a time as you type
+    override func textDidChange(_ notification: Notification) {
+        super.textDidChange(notification)
+        invalidateIntrinsicContentSize()
+    }
+
+    /// Makes `row` as tall as this text's lines need, with a point clear above and below, and keeps `control`, at its
+    /// left, on the first line however many there are. Gives back the constraint that keeps it there, which goes by
+    /// the font (`firstLineCenter`).
+    func fit(_ row: NSView, beside control: NSView) -> NSLayoutConstraint {
+        let top = topAnchor.constraint(equalTo: row.topAnchor, constant: 1)
+        let bottom = row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 1)
+        // No taller than the text, unless the control is taller than a line of small text
+        top.priority = .defaultLow
+        bottom.priority = .defaultLow
+        let onFirstLine = control.centerYAnchor.constraint(equalTo: firstBaselineAnchor)
+        NSLayoutConstraint.activate([
+            top, bottom, onFirstLine,
+            topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 1),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: bottomAnchor, constant: 1),
+            control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: control.bottomAnchor),
+        ])
+        return onFirstLine
+    }
+
+    /// Where the middle of a line's capital letters is from its baseline, which is where a checkbox looks level with
+    /// the text. It's above the baseline, so it's negative.
+    static func firstLineCenter(_ font: NSFont) -> CGFloat {
+        let capitals = font.capHeight > 0 ? font.capHeight : font.ascender * 0.7
+        return -(capitals / 2).rounded()
+    }
+
+    /// The height of one line of text
+    static func lineHeight(_ font: NSFont?) -> CGFloat {
+        let font = font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        return ceil(font.ascender - font.descender + font.leading)
     }
 }
 

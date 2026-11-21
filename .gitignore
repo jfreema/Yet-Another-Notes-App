@@ -63,3 +63,5 @@ fastlane/test_output
 
 # Build output
 build/
+# The zipped app that ./build.sh --release makes. It's published as a GitHub Release, not committed.
+downloads/YANA.zip

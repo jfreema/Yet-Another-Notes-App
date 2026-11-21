@@ -221,4 +221,51 @@ struct NoteStoreTests {
         let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
         #expect(names.contains { $0.hasPrefix("Notes (unreadable") })
     }
+
+    @Test func keepsDeletedNotesFor30Days() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = NoteStore(folder: folder)
+        let now = Date()
+        let day: TimeInterval = 24 * 60 * 60
+        #expect(store.loadDeleted(now: now).isEmpty)
+
+        // One with nothing in it isn't kept
+        store.keepDeleted(Note(kind: .list), at: now)
+        #expect(!FileManager.default.fileExists(atPath: store.deletedFile.path))
+
+        let sync = SyncInfo(folder: "here", devices: ["a", "b"], devicesChanged: now, orderChanged: now, deleted: [:])
+        store.keepDeleted(Note(kind: .text, text: "Old"), at: now.addingTimeInterval(-31 * day))
+        store.keepDeleted(Note(kind: .list, items: [ToDo(text: "Milk")], name: "Groceries", sync: sync),
+                          at: now.addingTimeInterval(-29 * day))
+        store.keepDeleted(Note(kind: .text, text: "New"), at: now.addingTimeInterval(-60))
+
+        // The latest first, without the one from over 30 days ago, which is gone from the file too
+        let kept = store.loadDeleted(now: now)
+        #expect(kept.map { $0.note.title } == ["New", "Groceries"])
+        #expect(kept[1].note.items.map(\.text) == ["Milk"])
+        #expect(kept[1].note.sync == nil)
+        let onDisk = try JSONDecoder().decode([NoteStore.DeletedNote].self, from: Data(contentsOf: store.deletedFile))
+        #expect(onDisk == kept)
+        // The notes themselves aren't touched
+        #expect(!FileManager.default.fileExists(atPath: store.file.path))
+
+        // Once they're all too old, or all put back, the file goes
+        #expect(store.loadDeleted(now: now.addingTimeInterval(31 * day)).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: store.deletedFile.path))
+    }
+
+    @Test func keepsOnlySoManyDeletedNotes() throws {
+        let folder = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = NoteStore(folder: folder)
+        let now = Date()
+        for number in 1...(NoteStore.deletedLimit + 2) {
+            store.keepDeleted(Note(kind: .text, text: "Note \(number)"), at: now.addingTimeInterval(Double(number)))
+        }
+        let kept = store.loadDeleted(now: now.addingTimeInterval(3600))
+        #expect(kept.count == NoteStore.deletedLimit)
+        #expect(kept.first?.note.text == "Note \(NoteStore.deletedLimit + 2)")
+        #expect(kept.last?.note.text == "Note 3")
+    }
 }
