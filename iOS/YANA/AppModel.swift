@@ -368,10 +368,15 @@ final class AppModel {
                 ToDo(text: "Ask Sam about the budget review, and send the slides from last week's meeting"),
                 ToDo(text: "Pick up dry cleaning", done: true),
                 ToDo(text: "Call the dentist"),
-            ], sync: sync),
-            Note(kind: .list, items: [ToDo(text: "Milk"), ToDo(text: "Eggs", done: true), ToDo(text: "Coffee beans")],
+            ], name: "This Week", sync: sync),
+            Note(kind: .list, items: [ToDo(text: "Milk"), ToDo(text: "Eggs", done: true), ToDo(text: "Coffee beans"),
+                                      ToDo(text: "Lemons"), ToDo(text: "Sourdough", done: true)],
                  name: "Groceries", sync: sync),
-            Note(kind: .list, items: [ToDo(text: "Gift ideas"), ToDo(text: "Scarf")]),
+            Note(kind: .list, items: [ToDo(text: "Fix the garden gate"), ToDo(text: "Return library books", done: true),
+                                      ToDo(text: "Plan Saturday hike")],
+                 name: "Weekend", sync: sync),
+            Note(kind: .list, items: [ToDo(text: "Scarf for Mom"), ToDo(text: "Board game for Alex")],
+                 name: "Gift Ideas"),
         ]
     }
     #endif
