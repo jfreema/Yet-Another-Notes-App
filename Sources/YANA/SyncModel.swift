@@ -30,7 +30,13 @@ struct SyncFolder: Codable, Equatable, Sendable, SyncFolderLayout {
         let files = (try? FileManager.default.contentsOfDirectory(at: devicesFolder, includingPropertiesForKeys: nil,
                                                                    options: [.skipsHiddenFiles])) ?? []
         return files.filter { $0.pathExtension == "json" }
-            .compactMap { try? JSONDecoder().decode(DeviceCard.self, from: Data(contentsOf: $0)) }
+            .compactMap { file -> DeviceCard? in
+                // A card is its device's own, and small
+                guard SyncLimits.fits(file, SyncLimits.cardBytes), let data = try? Data(contentsOf: file) else {
+                    return nil
+                }
+                return DeviceCard.read(data, device: file.deletingPathExtension().lastPathComponent)
+            }
             .sorted { $0.seen > $1.seen }
     }
 }

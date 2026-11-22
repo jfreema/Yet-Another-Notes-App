@@ -8,8 +8,10 @@ protocol SyncHost: AnyObject {
     func showSynced(_ note: Note, on page: NotePage)
     /// Adds a tab for a list another device sent here
     func addSynced(_ note: Note)
-    /// Takes away a list another device stopped sending here
+    /// Takes away a list another device stopped sending here. What this Mac had of it is the host's to keep.
     func removeSynced(_ page: NotePage)
+    /// Another device took lists off this Mac, which `ListSync.takenOff` has to say
+    func tookOff()
     /// A sync folder stopped being readable, or started again, so the tabs' sync marks may be out of date
     func syncStateChanged()
     /// A device started using a sync folder that lists here sync through, so they can be sent to it
@@ -17,6 +19,7 @@ protocol SyncHost: AnyObject {
 }
 
 extension SyncHost {
+    func tookOff() {}
     func syncStateChanged() {}
     func offer(_ device: DeviceCard, in folder: SyncFolder) {}
 }
@@ -45,7 +48,8 @@ enum SyncState: Equatable {
 /// copy, shows the result, and writes this Mac's copy when it has changed. Lists another device sends here get a tab
 /// of their own. What a pass does is worked out by `SyncPass`, which YANA for iPhone uses too: this class reads and
 /// writes the files, and shows the result. It also keeps track of which folders could be read, for the tabs' sync
-/// marks, and notices a device that starts using a folder.
+/// marks, notices a device that starts using a folder, and keeps what there is to say about lists other devices took
+/// off this Mac.
 @MainActor
 final class ListSync {
     weak var host: SyncHost?
@@ -94,10 +98,19 @@ final class ListSync {
     var devicesLookedEvery: TimeInterval = 30
     private var devicesLooked = Date.distantPast
 
+    /// The lists other devices took this Mac off that nobody has been told about yet. The note says so the next time
+    /// it's showing, which may be after YANA is reopened, so they're kept between launches.
+    private(set) var takenOff: [TakenOff] = []
+
+    /// The most tabs this Mac has before lists other devices send here wait in their folder. Far more than YANA's
+    /// own lists come to, so a folder full of lists that aren't YANA's can't fill the note with tabs.
+    static let mostTabs = 20
+
     private enum Key {
         static let lastRead = "syncLastRead"
         static let devices = "syncKnownDevices"
         static let left = "syncLeft"
+        static let takenOff = "syncTakenOff"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -106,6 +119,9 @@ final class ListSync {
         let forgotten = Date().addingTimeInterval(-SyncMerge.deletionsKept)
         for (key, date) in (defaults.dictionary(forKey: Key.left) as? [String: Date]) ?? [:] where date > forgotten {
             if let id = UUID(uuidString: key) { left[id] = date }
+        }
+        if let data = defaults.data(forKey: Key.takenOff) {
+            takenOff = (try? JSONDecoder().decode([TakenOff].self, from: data)) ?? []
         }
     }
 
@@ -226,13 +242,25 @@ final class ListSync {
         let found = await files.read(folders)
         reading = false
         took(folders, found: found)
-        for write in merge(found, folders: folders) {
+        let merged = merge(found, folders: folders)
+        for write in merged.writes {
             await files.write(write.copy, to: write.file)
+        }
+        var cards: [String: [DeviceCard]]?
+        if !merged.taken.isEmpty {
+            // Which device did it is in the folder's cards
+            let read = await files.cards(in: folders)
+            cards = read
+            took(off: merged.taken, cards: read)
         }
         let now = Date()
         if now.timeIntervalSince(devicesLooked) >= devicesLookedEvery {
             devicesLooked = now
-            noticed(await files.cards(in: folders), in: folders)
+            if let cards {
+                noticed(cards, in: folders)
+            } else {
+                noticed(await files.cards(in: folders), in: folders)
+            }
         }
         if again {
             again = false
@@ -275,6 +303,40 @@ final class ListSync {
             defaults.set(lastRead, forKey: Key.lastRead)
         }
         if changed { host?.syncStateChanged() }
+    }
+
+    // MARK: Lists taken off this Mac
+
+    /// Keeps what there is to say about lists other devices took off this Mac, with the name each device's card
+    /// gives it, and tells the host
+    private func took(off lists: [(list: TakenOff, by: String)], cards: [String: [DeviceCard]]) {
+        var names: [String: String] = [:]
+        for card in cards.values.joined() where names[card.id] == nil {
+            names[card.id] = card.name
+        }
+        takenOff += lists.map { taken in
+            var list = taken.list
+            // Not this Mac, whatever a copy says
+            list.by = taken.by == ThisDevice.id ? nil : names[taken.by]
+            return list
+        }
+        saveTakenOff()
+        host?.tookOff()
+    }
+
+    /// The note has said what `takenOff` had to say
+    func saidTakenOff() {
+        guard !takenOff.isEmpty else { return }
+        takenOff = []
+        saveTakenOff()
+    }
+
+    private func saveTakenOff() {
+        if takenOff.isEmpty {
+            defaults.removeObject(forKey: Key.takenOff)
+        } else {
+            defaults.set(try? JSONEncoder().encode(takenOff), forKey: Key.takenOff)
+        }
     }
 
     // MARK: A folder's lists, and its devices
@@ -337,9 +399,11 @@ final class ListSync {
         }
     }
 
-    /// Merges what was read from the folders into the tabs, and gives back this Mac's copies to write
-    private func merge(_ found: FoundLists, folders: [SyncFolder]) -> [(copy: SyncedList, file: URL)] {
-        guard let host else { return [] }
+    /// Merges what was read from the folders into the tabs. Gives back this Mac's copies to write, and the lists
+    /// another device took this Mac off, each with that device's id.
+    private func merge(_ found: FoundLists, folders: [SyncFolder])
+        -> (writes: [(copy: SyncedList, file: URL)], taken: [(list: TakenOff, by: String)]) {
+        guard let host else { return ([], []) }
         let me = ThisDevice.id
         // Only the synced lists are looked at, so a pass doesn't copy out the text of every note
         let pages = host.notePages
@@ -355,13 +419,24 @@ final class ListSync {
             // with the cursor in it doesn't: the cursor can sit there for hours, and then nothing would sync.
             if (page as? TodoList)?.isDragging == true { waiting.insert(local.id) }
         }
+        let now = Date()
+        // A list left while this Mac's date was wrong left now, as far as anyone can tell. Left dated in the future,
+        // it couldn't be sent here again until then.
+        for (id, when) in left where SyncMerge.isAhead(when, of: now) {
+            remember(left: id, at: now)
+        }
         let changes = engine.run(lists: lists, here: Set(pages.map { $0.id }), folders: folders.map(\.id), found: found,
-                                 left: left, waiting: waiting, now: Date())
+                                 left: left, waiting: waiting, room: max(0, Self.mostTabs - pages.count), now: now)
 
-        // Another device took this Mac off these
-        for id in changes.removed {
-            known[id] = nil
-            if let page = synced[id] { host.removeSynced(page) }
+        // Another device took this Mac off these. The tab goes, as that device asked, and the note says so.
+        var taken: [(list: TakenOff, by: String)] = []
+        for removal in changes.removed {
+            known[removal.list] = nil
+            guard let page = synced[removal.list] else { continue }
+            let note = page.note
+            logger.notice("Another device took this Mac off a synced list")
+            taken.append((TakenOff(title: note.title, by: nil, kept: !note.isEmpty), removal.by))
+            host.removeSynced(page)
         }
         for merged in changes.merged {
             guard let page = synced[merged.note.id] else { continue }
@@ -390,7 +465,7 @@ final class ListSync {
             guard let folder = places[write.folder] else { continue }
             writes.append((copy: write.copy, file: folder.copy(of: write.list, by: me)))
         }
-        return writes
+        return (writes, taken)
     }
 }
 
@@ -402,6 +477,8 @@ actor SyncFiles {
     private var cache: [String: (data: Data, list: SyncedList)] = [:]
     /// The folders that couldn't be read last time, so each is logged once, not every few seconds
     private var unreadable: Set<String> = []
+    /// The files skipped for not being what their names say or for their size, so each is logged once
+    private var skipped: Set<String> = []
 
     /// Every list in every folder: folder id → list id → the devices' copies. A folder that can't be read is left out.
     func read(_ folders: [SyncFolder]) -> FoundLists {
@@ -436,12 +513,26 @@ actor SyncFiles {
         return found
     }
 
+    /// A device's copy of a list, if the file is one: no bigger than a copy gets, and that device's own
     private func read(_ file: URL) -> SyncedList? {
+        guard SyncLimits.fits(file, SyncLimits.copyBytes) else { return skip(file) }
         guard let data = try? Data(contentsOf: file) else { return nil }
         if let cached = cache[file.path], cached.data == data { return cached.list }
-        guard let list = try? JSONDecoder().decode(SyncedList.self, from: data) else { return nil }
+        guard let list = SyncedList.read(data, device: file.deletingPathExtension().lastPathComponent) else {
+            return skip(file)
+        }
         cache[file.path] = (data, list)
+        skipped.remove(file.path)
         return list
+    }
+
+    /// Leaves out a file that isn't a copy YANA takes, and says so in the log the first time
+    private func skip(_ file: URL) -> SyncedList? {
+        cache[file.path] = nil
+        if skipped.insert(file.path).inserted {
+            logger.error("Skipped a file in a sync folder that isn't a list YANA takes: too big, or not what its name says")
+        }
+        return nil
     }
 
     /// Whether it was written
@@ -470,7 +561,13 @@ actor SyncFiles {
                                                                            includingPropertiesForKeys: nil,
                                                                            options: [.skipsHiddenFiles]) else { continue }
             cards[folder.id] = files.filter { $0.pathExtension == "json" }
-                .compactMap { try? JSONDecoder().decode(DeviceCard.self, from: Data(contentsOf: $0)) }
+                .compactMap { file -> DeviceCard? in
+                    // A card is its device's own, and small
+                    guard SyncLimits.fits(file, SyncLimits.cardBytes), let data = try? Data(contentsOf: file) else {
+                        return nil
+                    }
+                    return DeviceCard.read(data, device: file.deletingPathExtension().lastPathComponent)
+                }
                 .sorted { ($0.name, $0.id) < ($1.name, $1.id) }
         }
         return cards

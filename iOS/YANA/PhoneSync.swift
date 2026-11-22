@@ -113,6 +113,21 @@ final class PhoneSync {
         for file in changes.deletes {
             await files.delete(file)
         }
+        if !changes.taken.isEmpty {
+            // Another device took this iPhone off these. Which one is in the folders' cards.
+            var names: [String: String] = [:]
+            for folder in folders {
+                for card in await files.devices(in: folder) where names[card.id] == nil {
+                    names[card.id] = card.name
+                }
+            }
+            model.tookOff(changes.taken.map { taken in
+                var list = taken.list
+                // Not this iPhone, whatever a copy says
+                list.by = taken.by == model.device ? nil : names[taken.by]
+                return list
+            })
+        }
         // A folder is unreadable when its bookmark wouldn't open, or what's in it couldn't be listed
         let still = Set(model.folders.map(\.id))
         model.synced(unreadable: all.subtracting(found.keys).intersection(still), read: still.intersection(found.keys))
@@ -229,16 +244,25 @@ final class PhoneSync {
         await flush()
     }
 
-    /// Merges what was read from the folders into the lists, and gives back this iPhone's copies to write and delete
+    /// Merges what was read from the folders into the lists. Gives back this iPhone's copies to write and delete, and
+    /// the lists another device took this iPhone off, each with that device's id.
     private func merge(_ found: FoundLists, folders: [OpenFolder])
-        -> (writes: [(copy: SyncedList, file: URL)], deletes: [URL]) {
-        guard let model else { return ([], []) }
+        -> (writes: [(copy: SyncedList, file: URL)], deletes: [URL], taken: [(list: TakenOff, by: String)]) {
+        guard let model else { return ([], [], []) }
         let me = model.device
+        let now = Date()
+        // A list left while this iPhone's date was wrong left now, as far as anyone can tell. Left dated in the
+        // future, it couldn't be sent here again until then.
+        for (id, when) in model.left where SyncMerge.isAhead(when, of: now) {
+            model.remember(left: id, at: now)
+        }
         let changes = engine.run(lists: model.lists.filter { $0.sync != nil }, here: Set(model.lists.map(\.id)),
-                                 folders: folders.map(\.id), found: found, left: model.left, now: Date())
-        // Another device took this iPhone off these
-        for id in changes.removed {
-            model.removeSynced(id)
+                                 folders: folders.map(\.id), found: found, left: model.left,
+                                 room: max(0, AppModel.mostLists - model.lists.count), now: now)
+        // Another device took this iPhone off these. The list goes, as that device asked, and YANA says so.
+        var taken: [(list: TakenOff, by: String)] = []
+        for removal in changes.removed {
+            if let list = model.removeSynced(removal.list) { taken.append((list, removal.by)) }
         }
         for merged in changes.merged {
             model.showSynced(merged.note)
@@ -259,7 +283,7 @@ final class PhoneSync {
             guard let folder = places[delete.folder] else { continue }
             deletes.append(folder.copy(of: delete.list, by: me))
         }
-        return (writes, deletes)
+        return (writes, deletes, taken)
     }
 }
 

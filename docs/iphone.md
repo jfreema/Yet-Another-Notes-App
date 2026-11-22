@@ -102,6 +102,9 @@ A list you delete stays in **Recently Deleted**, at the bottom of your lists, fo
 list again. A list that synced comes back on this iPhone only: to sync it again, bring it over from its folder in
 Settings, or choose **Sync This List…**.
 
+When another device takes a list off this iPhone, say by unticking it there, YANA tells you which device did and
+which list, and what the iPhone had of it waits in Recently Deleted the same way.
+
 A list is named after its first task until you name it: choose **Rename…** from its **…** menu, or touch and hold it
 in your lists. Leave the name empty to go back. The name syncs both ways with your Macs (on YANA 1.8 or later).
 

@@ -2,7 +2,8 @@ import AppKit
 import UniformTypeIdentifiers
 
 /// The note window: up to four tabs of notes and to-do lists, plus any lists synced here from other devices. Closing it
-/// hides it to the menu bar. Each tab has its own Undo, and a deleted tab's note or list can be put back for 30 days.
+/// hides it to the menu bar. Each tab has its own Undo, and a deleted tab's note or list can be put back for 30 days,
+/// as can a list another device took off this Mac, which the note says when it's next showing.
 @MainActor
 final class NoteWindowController: NSObject, NSWindowDelegate {
     let window: NSWindow
@@ -559,14 +560,31 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
     // MARK: A new device in a sync folder
 
     private func showOffersSoon() {
-        guard !offers.isEmpty else { return }
+        guard !offers.isEmpty || !listSync.takenOff.isEmpty else { return }
         NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(showOffers), object: nil)
         perform(#selector(showOffers), with: nil, afterDelay: 0)
     }
 
-    /// Offers the next new device the lists that sync through its folder, once the note is showing with nothing over it
+    /// What the note has to say about lists other devices took off this Mac, until it has said it
+    var takenOffNotice: (title: String, text: String)? {
+        listSync.takenOff.notice(on: "this Mac", recentlyDeleted: "in the … menu")
+    }
+
+    /// Once the note is showing with nothing over it: says which lists other devices took off this Mac, then offers
+    /// the next new device the lists that sync through its folder. YANA never opens by itself to say either.
     @objc private func showOffers() {
-        guard window.isVisible, window.attachedSheet == nil, !offers.isEmpty else { return }
+        guard window.isVisible, window.attachedSheet == nil else { return }
+        if let notice = takenOffNotice {
+            listSync.saidTakenOff()
+            let alert = NSAlert()
+            alert.messageText = notice.title
+            alert.informativeText = notice.text
+            alert.beginSheetModal(for: window) { [weak self] _ in
+                MainActor.assumeIsolated { self?.showOffersSoon() }
+            }
+            return
+        }
+        guard !offers.isEmpty else { return }
         let (device, folder) = offers.removeFirst()
         // Only the lists that still don't go to it: it may have brought some over itself by now
         let lists = Array(listSync.lists(notGoingTo: device.id, in: folder).prefix(Self.offeredAtOnce))
@@ -908,7 +926,8 @@ extension NoteWindowController: SyncHost {
 
     func removeSynced(_ page: NotePage) {
         guard let index = pages.firstIndex(where: { $0 === page }) else { return }
-        // Another device took it off this Mac, so what this Mac had can still be put back
+        // Another device took it off this Mac, so what this Mac had can still be put back. `ListSync` keeps what
+        // there is to say about it, and the note says it the next time it's showing.
         store.keepDeleted(page.note)
         page.undo.removeAllActions()
         if pages.count == 1 {
@@ -924,6 +943,10 @@ extension NoteWindowController: SyncHost {
             select(min(selected, pages.count - 1))
         }
         save()
+    }
+
+    func tookOff() {
+        showOffersSoon()
     }
 
     func syncStateChanged() {

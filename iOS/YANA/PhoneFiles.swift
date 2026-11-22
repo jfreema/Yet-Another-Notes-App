@@ -53,13 +53,23 @@ actor PhoneFiles {
         return found
     }
 
+    /// A device's copy of a list, if the file is one: no bigger than a copy gets, and that device's own. One that
+    /// isn't is left out, the same as a file that isn't YANA's at all.
     private func read(_ file: URL, onPhone: Bool) -> SyncedList? {
         guard onPhone else { return cache[file.path]?.list }
         let download = Self.download(of: file)
         if !download.current { asked = true }
-        guard download.readable, let data = Self.coordinatedRead(file) else { return cache[file.path]?.list }
+        guard download.readable else { return cache[file.path]?.list }
+        guard SyncLimits.fits(file, SyncLimits.copyBytes) else {
+            cache[file.path] = nil
+            return nil
+        }
+        guard let data = Self.coordinatedRead(file) else { return cache[file.path]?.list }
         if let cached = cache[file.path], cached.data == data { return cached.list }
-        guard let list = try? JSONDecoder().decode(SyncedList.self, from: data) else { return nil }
+        guard let list = SyncedList.read(data, device: file.deletingPathExtension().lastPathComponent) else {
+            cache[file.path] = nil
+            return nil
+        }
         cache[file.path] = (data, list)
         return list
     }
@@ -116,9 +126,10 @@ actor PhoneFiles {
             let id = found.file.deletingPathExtension().lastPathComponent
             if !ids.contains(id) { ids.append(id) }
             if !found.onPhone { asked = true }
-            guard found.onPhone, Self.isDownloaded(found.file),
+            // A card is its device's own, and small
+            guard found.onPhone, Self.isDownloaded(found.file), SyncLimits.fits(found.file, SyncLimits.cardBytes),
                   let data = Self.coordinatedRead(found.file),
-                  let card = try? JSONDecoder().decode(DeviceCard.self, from: data),
+                  let card = DeviceCard.read(data, device: id),
                   !cards.contains(where: { $0.id == card.id }) else { continue }
             cards.append(card)
         }

@@ -41,7 +41,7 @@ Adding the folder on the other Mac is often all it takes. YANA there shows the l
 
 The list appears on the other Macs within seconds, as its own tab, with a sync mark. Changes on any of them merge task by task: two Macs can change different tasks at once, and when both change the same task, the later change wins. Renaming the list renames it everywhere, though a Mac still on YANA 1.7 keeps naming it after its first task. Lists sent from other Macs get a tab even when you already have four.
 
-**Sync Settings for This List…** changes which Macs get it, or stops it syncing (each Mac keeps its own copy). Unticking a Mac takes the list off that Mac. Deleting a synced list's tab removes it from this Mac only: to bring it back, choose **Add Sync Folder…** and pick the folder again. Under each Mac it says when YANA last heard from it, which is the last time that Mac had a change to pass on.
+**Sync Settings for This List…** changes which Macs get it, or stops it syncing (each Mac keeps its own copy). Unticking a Mac takes the list off that Mac, which says so the next time its note is open and keeps what it had in **Recently Deleted** for 30 days. Deleting a synced list's tab removes it from this Mac only: to bring it back, choose **Add Sync Folder…** and pick the folder again. Under each Mac it says when YANA last heard from it, which is the last time that Mac had a change to pass on.
 
 If YANA can't open a list's sync folder, say because the folder was moved or iCloud Drive is turned off, the sync mark on the list's tab turns into an orange warning. Rest the mouse on the tab to see when the list last synced.
 
@@ -49,7 +49,7 @@ Only to-do lists sync, not notes. Any folder that syncs between your Macs works,
 
 ## YANA for iPhone
 
-YANA for iPhone shows and edits your synced to-do lists. Add the sync folder in it (**Add Sync Folder…**, then pick the folder in iCloud Drive), and it shows the lists in that folder to bring over. Check tasks off, change them, press Return in one to start a new one below it, touch and hold one to drag it into order, and clear the checked ones. Name a list with **Rename…** in its **…** menu, or touch and hold it in your lists. A list started on the iPhone goes to your Macs with **Sync This List…**. A swiped-away task can be put back with **Undo**, and a deleted list stays in **Recently Deleted** for 30 days. A list whose sync folder can't be opened says **Not syncing**. It syncs while it's open, and catches up when you open it.
+YANA for iPhone shows and edits your synced to-do lists. Add the sync folder in it (**Add Sync Folder…**, then pick the folder in iCloud Drive), and it shows the lists in that folder to bring over. Check tasks off, change them, press Return in one to start a new one below it, touch and hold one to drag it into order, and clear the checked ones. Name a list with **Rename…** in its **…** menu, or touch and hold it in your lists. A list started on the iPhone goes to your Macs with **Sync This List…**. A swiped-away task can be put back with **Undo**, and a deleted list stays in **Recently Deleted** for 30 days. A list whose sync folder can't be opened says **Not syncing**. When another device takes a list off the iPhone, it says which device did, and the list waits in **Recently Deleted**. It syncs while it's open, and catches up when you open it.
 
 It's installed through TestFlight. Setting that up, once, is in [docs/iphone.md](docs/iphone.md).
 
