@@ -50,12 +50,4 @@ struct MenuBarIconTests {
         #expect(solid > 0)
         #expect(opacity(rep, x: 13.6, y: 5.5, scale: scale) == 0)
     }
-
-    /// TEMPORARY, this branch only and never for main: prints the icon, so it can be looked at without a Mac
-    @Test func printsItself() throws {
-        for scale in [1, 2, 12] {
-            let png = try #require(Self.bitmap(scale: scale).representation(using: .png, properties: [:]))
-            print("MENUBAR_ICON_PNG scale=\(scale) \(png.base64EncodedString())")
-        }
-    }
 }
