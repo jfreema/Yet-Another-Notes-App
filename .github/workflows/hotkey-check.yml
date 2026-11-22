@@ -1,0 +1,142 @@
+name: Hot key check (temporary)
+
+# Only for this thread's branch, and never for main: runs the tests with the real key press turned on, then runs YANA
+# itself with another app in front and presses Control-Option-N, to see the note open and come to the front.
+
+on:
+  push:
+    branches: [claude/project-thread-7c1x2i]
+    paths:
+      - .github/workflows/hotkey-check.yml
+      - .github/scripts/front_window.swift
+      - Sources/YANA/**
+      - Tests/YANATests/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hotkey-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test, pressing the real keys
+        timeout-minutes: 15
+        env:
+          YANA_PRESS_KEYS: "1"
+        run: |
+          sw_vers
+          swift --version
+          swift test
+
+      - name: Run YANA behind another app and press Control-Option-N
+        timeout-minutes: 10
+        run: |
+          swift build
+          bin="$(swift build --show-bin-path)/YANA"
+          swiftc -O .github/scripts/front_window.swift -o front_window
+          count() {
+            osascript -e 'tell application "System Events" to count windows of (first process whose name is "YANA")' 2>&1
+          }
+          front() {
+            osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>&1
+          }
+          # The app whose window is in front of every other window on the screen
+          top() {
+            ./front_window | cut -d, -f1
+          }
+          press() {
+            osascript -e 'tell application "System Events" to key code 45 using {control down, option down}'
+          }
+          finder() {
+            osascript -e 'tell application "Finder" to activate' \
+                      -e 'tell application "Finder" to if (count of Finder windows) is 0 then make new Finder window'
+            sleep 2
+          }
+          say_state() {
+            echo "$1: $(count) YANA windows, app in front: $(front), windows front to back: $(./front_window)"
+          }
+
+          echo "::group::The shortcut on, with Finder in front"
+          "$bin" > yana.log 2>&1 &
+          pid=$!
+          sleep 5
+          at_launch="$(count)"
+          finder
+          say_state "At launch, Finder in front"
+          before_front="$(front)"
+
+          press
+          sleep 2
+          say_state "After the first press"
+          first_count="$(count)"; first_front="$(front)"; first_top="$(top)"
+
+          press
+          sleep 2
+          say_state "After a second press"
+          second_count="$(count)"; second_front="$(front)"; second_top="$(top)"
+
+          # The note stays open, behind Finder
+          finder
+          say_state "Finder put in front again"
+          behind_count="$(count)"; behind_front="$(front)"; behind_top="$(top)"
+
+          press
+          sleep 2
+          say_state "After a third press"
+          third_count="$(count)"; third_front="$(front)"; third_top="$(top)"
+
+          kill "$pid"
+          wait "$pid" 2>/dev/null || true
+          echo "::endgroup::"
+
+          echo "::group::The shortcut turned off"
+          defaults write YANA hotKey -bool false
+          "$bin" >> yana.log 2>&1 &
+          pid=$!
+          sleep 5
+          finder
+          press
+          sleep 2
+          say_state "Turned off, after a press"
+          off="$(count)"
+          kill "$pid"
+          wait "$pid" 2>/dev/null || true
+          defaults delete YANA hotKey
+          echo "::endgroup::"
+
+          echo "::group::What YANA logged"
+          cat yana.log
+          log show --last 3m --predicate 'subsystem == "io.github.jfreema.yana"' --info --style compact | tail -20 || true
+          echo "::endgroup::"
+
+          failed=0
+          expect() {
+            if [[ "$2" == "$3" ]]; then echo "ok: $1 is $2"; else echo "::error::$1 is $2, expected $3"; failed=1; fi
+          }
+          expect "windows at launch" "$at_launch" 0
+          expect "app in front before the first press" "$before_front" Finder
+          expect "windows after the first press" "$first_count" 1
+          expect "app in front after the first press" "$first_front" YANA
+          expect "front window after the first press" "$first_top" YANA
+          expect "windows after a second press" "$second_count" 1
+          expect "app in front after a second press" "$second_front" YANA
+          expect "front window after a second press" "$second_top" YANA
+          expect "windows with Finder in front again" "$behind_count" 1
+          expect "app in front with Finder in front again" "$behind_front" Finder
+          expect "front window with Finder in front again" "$behind_top" Finder
+          expect "windows after a third press" "$third_count" 1
+          expect "app in front after a third press" "$third_front" YANA
+          expect "front window after a third press" "$third_top" YANA
+          expect "windows with the shortcut turned off" "$off" 0
+          exit "$failed"
