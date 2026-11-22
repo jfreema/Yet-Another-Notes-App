@@ -8,7 +8,7 @@ on:
     branches: [claude/project-thread-7c1x2i]
     paths:
       - .github/workflows/hotkey-check.yml
-      - .github/scripts/front_window.swift
+      - .github/hotkey-check-front.swift
       - Sources/YANA/**
       - Tests/YANATests/**
 
@@ -44,19 +44,28 @@ jobs:
         run: |
           swift build
           bin="$(swift build --show-bin-path)/YANA"
-          swiftc -O .github/scripts/front_window.swift -o front_window
+          swiftc -O .github/hotkey-check-front.swift -o front
+          notes="$HOME/Library/Application Support/YANA/Notes.json"
           count() {
             osascript -e 'tell application "System Events" to count windows of (first process whose name is "YANA")' 2>&1
           }
-          front() {
-            osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>&1
+          # The app that gets the keys, as macOS says it
+          app() {
+            ./front app
           }
           # The app whose window is in front of every other window on the screen
           top() {
-            ./front_window | cut -d, -f1
+            ./front windows | cut -d, -f1
           }
           press() {
             osascript -e 'tell application "System Events" to key code 45 using {control down, option down}'
+            sleep 2
+          }
+          # Types a word, and says whether it landed in YANA's note
+          typed() {
+            osascript -e "tell application \"System Events\" to keystroke \"$1\""
+            sleep 2
+            if grep -q "$1" "$notes" 2>/dev/null; then echo yes; else echo no; fi
           }
           finder() {
             osascript -e 'tell application "Finder" to activate' \
@@ -64,7 +73,7 @@ jobs:
             sleep 2
           }
           say_state() {
-            echo "$1: $(count) YANA windows, app in front: $(front), windows front to back: $(./front_window)"
+            echo "$1: $(count) YANA windows, app in front: $(app), windows front to back: $(./front windows)"
           }
 
           echo "::group::The shortcut on, with Finder in front"
@@ -74,27 +83,30 @@ jobs:
           at_launch="$(count)"
           finder
           say_state "At launch, Finder in front"
-          before_front="$(front)"
+          before_app="$(app)"
 
           press
-          sleep 2
           say_state "After the first press"
-          first_count="$(count)"; first_front="$(front)"; first_top="$(top)"
+          first_count="$(count)"; first_app="$(app)"; first_top="$(top)"
+          first_typed="$(typed zebra)"
+          echo "Typing after the first press landed in the note: $first_typed"
 
           press
-          sleep 2
           say_state "After a second press"
-          second_count="$(count)"; second_front="$(front)"; second_top="$(top)"
+          second_count="$(count)"; second_app="$(app)"; second_top="$(top)"
 
           # The note stays open, behind Finder
           finder
           say_state "Finder put in front again"
-          behind_count="$(count)"; behind_front="$(front)"; behind_top="$(top)"
+          behind_count="$(count)"; behind_app="$(app)"; behind_top="$(top)"
+          behind_typed="$(typed okapi)"
+          echo "Typing with Finder in front landed in the note: $behind_typed"
 
           press
-          sleep 2
           say_state "After a third press"
-          third_count="$(count)"; third_front="$(front)"; third_top="$(top)"
+          third_count="$(count)"; third_app="$(app)"; third_top="$(top)"
+          third_typed="$(typed quagga)"
+          echo "Typing after the third press landed in the note: $third_typed"
 
           kill "$pid"
           wait "$pid" 2>/dev/null || true
@@ -107,7 +119,6 @@ jobs:
           sleep 5
           finder
           press
-          sleep 2
           say_state "Turned off, after a press"
           off="$(count)"
           kill "$pid"
@@ -117,7 +128,7 @@ jobs:
 
           echo "::group::What YANA logged"
           cat yana.log
-          log show --last 3m --predicate 'subsystem == "io.github.jfreema.yana"' --info --style compact | tail -20 || true
+          log show --last 3m --predicate 'subsystem == "io.github.jfreema.yana" AND process == "YANA"' --info --style compact | tail -20 || true
           echo "::endgroup::"
 
           failed=0
@@ -125,18 +136,21 @@ jobs:
             if [[ "$2" == "$3" ]]; then echo "ok: $1 is $2"; else echo "::error::$1 is $2, expected $3"; failed=1; fi
           }
           expect "windows at launch" "$at_launch" 0
-          expect "app in front before the first press" "$before_front" Finder
+          expect "app in front before the first press" "$before_app" Finder
           expect "windows after the first press" "$first_count" 1
-          expect "app in front after the first press" "$first_front" YANA
+          expect "app in front after the first press" "$first_app" YANA
           expect "front window after the first press" "$first_top" YANA
+          expect "typing after the first press lands in the note" "$first_typed" yes
           expect "windows after a second press" "$second_count" 1
-          expect "app in front after a second press" "$second_front" YANA
+          expect "app in front after a second press" "$second_app" YANA
           expect "front window after a second press" "$second_top" YANA
           expect "windows with Finder in front again" "$behind_count" 1
-          expect "app in front with Finder in front again" "$behind_front" Finder
+          expect "app in front with Finder in front again" "$behind_app" Finder
           expect "front window with Finder in front again" "$behind_top" Finder
+          expect "typing with Finder in front lands in the note" "$behind_typed" no
           expect "windows after a third press" "$third_count" 1
-          expect "app in front after a third press" "$third_front" YANA
+          expect "app in front after a third press" "$third_app" YANA
           expect "front window after a third press" "$third_top" YANA
+          expect "typing after the third press lands in the note" "$third_typed" yes
           expect "windows with the shortcut turned off" "$off" 0
           exit "$failed"
