@@ -15,7 +15,7 @@
 </p>
 
 - **One click away.** Click the menu bar icon to show your note and again to put it away. Everything saves as you type.
-- **Or one shortcut away.** Press ⌃⌥N (Control-Option-N) in any app to show your note, and again to put it away. To turn the shortcut off, untick **Show and Hide with ⌃⌥N** in the **…** menu.
+- **Or one shortcut away.** Press ⌃⌥N (Control-Option-N) in any app to open your note and bring it to the front. To turn the shortcut off, untick **Show Note with ⌃⌥N** in the **…** menu.
 - **Notes and to-do lists.** Keep up to four tabs. Check tasks off and clear them away with **Clear Checked**, press Return in one to add a task below it, drag them into order, or turn a note into a list with ⇧⌘L. A long task wraps onto as many lines as it needs.
 - **Undo, and Recently Deleted.** ⌘Z puts back a task you deleted, and each tab keeps its own Undo while you're on another. A deleted tab's note or list stays in **Recently Deleted**, in the **…** menu, for 30 days: choose it there to put it back.
 - **Name your lists.** A tab is named after its first task or line until you give it a name: double-click the tab, or right-click it and choose **Rename List…** (also in the **…** menu). Clear the name to go back. A synced list's name goes to your other Macs and your iPhone.

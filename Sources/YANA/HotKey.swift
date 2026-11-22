@@ -1,8 +1,9 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// The keyboard shortcut that shows or hides the note from any app: Control-Option-N. It's a Carbon hot key, the one
-/// kind of system-wide shortcut macOS gives an app without a permission such as Accessibility or Input Monitoring.
+/// The keyboard shortcut that opens the note from any app and brings it to the front: Control-Option-N. It's a Carbon
+/// hot key, the one kind of system-wide shortcut macOS gives an app without a permission such as Accessibility or
+/// Input Monitoring.
 @MainActor
 final class HotKey {
     /// The keys, as menus write them

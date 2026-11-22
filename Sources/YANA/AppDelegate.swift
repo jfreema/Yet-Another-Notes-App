@@ -26,8 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         note.menuProvider = { [unowned self] in self.statusMenu }
 
-        // The shortcut does what a click on the menu bar icon does
-        hotKey.action = { [unowned self] in self.note.toggle() }
+        // The shortcut opens the note and brings it to the front, over whatever app is showing. It never puts the
+        // note away, which a click on the menu bar icon or the note's close button does.
+        hotKey.action = { [unowned self] in self.note.show() }
         hotKey.start()
 
         DistributedNotificationCenter.default().addObserver(forName: YANA.showNoteNotification, object: nil,
@@ -84,8 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Save As…", #selector(saveTextFileAs)))
         menu.addItem(.separator())
         menu.addItem(item("Open at Login", #selector(toggleOpenAtLogin), tag: Tag.openAtLogin))
-        let shortcut = item("Show and Hide with \(HotKey.title)", #selector(toggleHotKey), tag: Tag.hotKey)
-        shortcut.toolTip = "Press Control-Option-N in any app to show the note, and again to put it away"
+        let shortcut = item("Show Note with \(HotKey.title)", #selector(toggleHotKey), tag: Tag.hotKey)
+        shortcut.toolTip = "Press Control-Option-N in any app to open the note and bring it to the front"
         menu.addItem(shortcut)
         menu.addItem(.separator())
         menu.addItem(item("About YANA", #selector(showAbout)))
