@@ -110,6 +110,12 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   that lets scripts type.
 - **Activation:** since macOS 14, `NSApp.activate()` is a request macOS can turn down, so alerts and the About panel
   use `NSApp.activateRegardless()`.
+- **The icons come from one drawing**, `scripts/icon/icon.svg`. `node scripts/icon/make.js` (Node with Playwright)
+  draws it into the Mac icon (`Resources/AppIcon.png`, which `build.sh` makes the `.icns` from), the iPhone's (the
+  whole square with nothing see-through, which the App Store insists on) and the README's. Change the drawing and
+  run it again, rather than editing the PNGs. The iPhone's icon here is still the yellow note from before: 1.0 was
+  in App Review when the Mac got this one, so the iPhone's goes in with its next version (the script writes it, so
+  leave that file out of a commit until then).
 
 ## Syncing
 
