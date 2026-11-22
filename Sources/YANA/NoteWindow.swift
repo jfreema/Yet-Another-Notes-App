@@ -145,10 +145,14 @@ final class NoteWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    /// Opens the note and brings it to the front, over whatever app is showing
     func show() {
         if NSApp.isHidden { NSApp.unhide(nil) }
         NSApp.activateRegardless()
         window.makeKeyAndOrderFront(nil)
+        // In front of the other apps' windows even if macOS turns the activation down, which it can when YANA is
+        // asked for from another app, as ⌃⌥N does
+        window.orderFrontRegardless()
         pages[selected].focus()
         // What other devices changed while the note was hidden shows now
         listSync.run()

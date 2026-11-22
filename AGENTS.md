@@ -6,10 +6,10 @@ Notes for any coding agent working on YANA.
 
 A macOS menu bar app with up to four tabs of plain-text notes and to-do lists, which can sync to-do lists with YANA on
 other Macs and YANA for iPhone (see [YANA for iPhone](#yana-for-iphone)), which also lives in this repo. Clicking the menu bar icon shows the
-note window, and closing it hides it back to the menu bar. The window can be kept on top, a slider sets its
-transparency, and sticky note mode makes it post-it yellow. It's Swift with SwiftPM, with no Xcode
-project and no third-party dependencies, for macOS 14 or later on Apple silicon or Intel. It's an accessory app
-(`LSUIElement`), with no Dock icon. [README.md](README.md) is the user guide.
+note window, and closing it hides it back to the menu bar. ⌃⌥N opens it from any app and brings it to the front. The window can be
+kept on top, a slider sets its transparency, and sticky note mode makes it post-it yellow. It's Swift with SwiftPM,
+with no Xcode project and no third-party dependencies, for macOS 14 or later on Apple silicon or Intel. It's an
+accessory app (`LSUIElement`), with no Dock icon. [README.md](README.md) is the user guide.
 
 ## Build and test
 
@@ -29,6 +29,7 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 |---|---|
 | Launch, one copy at a time | `YANA` |
 | Menu bar icon, its menu, About, Open at Login | `AppDelegate` |
+| ⌃⌥N, the shortcut that opens the note from any app and brings it to the front | `HotKey` |
 | Keyboard shortcuts (new tab, convert to list, open and save .txt, Edit, Find, text size, ⌘1–⌘4, ⌘W) | `MainMenu` |
 | The note window: tabs, pin, transparency slider, sticky note mode, converting a note to a list, opening and saving .txt files | `NoteWindow` |
 | The tab strip | `TabBar` |
@@ -96,6 +97,17 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   storage's `editedRange` and `changeInLength`, so finding the cursor's line is a look-up and not a count from the top;
   it starts over if an edit doesn't fit. The notes are saved half a second after the last change, and `NoteStore.save`
   skips the write when the notes encode to what it last read or wrote, which it keeps in memory.
+- **⌃⌥N is a Carbon hot key** (`RegisterEventHotKey`), the one system-wide shortcut that needs no permission: an
+  event tap or a global `NSEvent` monitor would have YANA ask for Accessibility or Input Monitoring. It opens
+  the note and brings it to the front, over whatever app is showing (`NoteWindowController.show`), and never puts it
+  away, unlike a click on the menu bar icon (`toggle`). `show` ends with `orderFrontRegardless`, so the note is in
+  front even if macOS turns the activation down. **Show Note with ⌃⌥N** in the menu turns the shortcut off
+  (`HotKey.isOn`, on until then). macOS turns the keys down when it has them itself (`isRegistered`): the menu item
+  is then unticked, and choosing it says why. Another app can take the same keys too, and then both hear them. Since
+  macOS 15 a hot key's modifiers can't be only Option or Shift, so keep Control or Command in it.
+- **`HotKeyTests` take other keys than ⌃⌥N**, one set per test, since an app can't take the same keys twice and a
+  YANA that's open has ⌃⌥N. `YANA_PRESS_KEYS=1 swift test` also presses ⌃⌥N for real with System Events, on a Mac
+  that lets scripts type.
 - **Activation:** since macOS 14, `NSApp.activate()` is a request macOS can turn down, so alerts and the About panel
   use `NSApp.activateRegardless()`.
 
