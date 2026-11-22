@@ -16,9 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "note.text", accessibilityDescription: "YANA")
-            image?.isTemplate = true
-            button.image = image
+            button.image = MenuBarIcon.image()
             button.toolTip = "YANA: click for your note, right-click for options"
             button.target = self
             button.action = #selector(statusItemClicked(_:))
