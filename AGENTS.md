@@ -28,7 +28,8 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 | Area | Files |
 |---|---|
 | Launch, one copy at a time | `YANA` |
-| Menu bar icon, its menu, About, Open at Login | `AppDelegate` |
+| The menu bar item, its menu, About, Open at Login | `AppDelegate` |
+| The menu bar icon, drawn in code | `MenuBarIcon` |
 | ⌃⌥N, the shortcut that opens the note from any app and brings it to the front | `HotKey` |
 | Keyboard shortcuts (new tab, convert to list, open and save .txt, Edit, Find, text size, ⌘1–⌘4, ⌘W) | `MainMenu` |
 | The note window: tabs, pin, transparency slider, sticky note mode, converting a note to a list, opening and saving .txt files | `NoteWindow` |
@@ -116,6 +117,9 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   run it again, rather than editing the PNGs. The iPhone's icon here is still the yellow note from before: 1.0 was
   in App Review when the Mac got this one, so the iPhone's goes in with its next version (the script writes it, so
   leave that file out of a commit until then).
+- **The menu bar icon isn't a picture.** `MenuBarIcon` draws it, two notes after the app icon, as a template image:
+  the menu bar gives it its color, and only how opaque each part is comes from the drawing, so the glass of the front
+  note is ink at about a quarter. `MenuBarIconTests` check that it draws, since nothing else would say.
 
 ## Syncing
 
