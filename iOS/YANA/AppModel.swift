@@ -57,6 +57,9 @@ final class AppModel {
     private(set) var undoable: DeletedTasks?
     /// Devices that have started using a folder, each waiting to be offered the lists that sync through it
     private(set) var offers: [DeviceOffer] = []
+    /// The lists other devices took this iPhone off that nobody has been told about yet. YANA says so over the
+    /// lists, which may be after it's reopened, so they're kept between launches.
+    private(set) var takenOff: [TakenOff] = []
     /// Counts the sync passes that read a folder. A screen that shows what's in a folder reads it again when this
     /// changes, which is when there may be something new there.
     private(set) var syncPasses = 0
@@ -88,11 +91,15 @@ final class AppModel {
         static let folders = "syncFolders"
         static let lastRead = "syncLastRead"
         static let knownDevices = "syncKnownDevices"
+        static let takenOff = "syncTakenOff"
     }
 
     /// How long a deleted list stays in Recently Deleted, and how many it holds
     static let deletedKept: TimeInterval = 30 * 24 * 60 * 60
     static let deletedLimit = 50
+    /// The most lists this iPhone has before lists other devices send here wait in their folder. Far more than
+    /// anyone keeps, so a folder full of lists that aren't YANA's can't fill the iPhone with them.
+    static let mostLists = 200
 
     init(storage: URL = AppModel.defaultStorage, defaults: UserDefaults = .standard) {
         self.storage = storage
@@ -107,6 +114,9 @@ final class AppModel {
             self.folders = folders
         }
         lastSynced = (defaults.dictionary(forKey: Keys.lastRead) as? [String: Date]) ?? [:]
+        if let data = defaults.data(forKey: Keys.takenOff) {
+            takenOff = (try? JSONDecoder().decode([TakenOff].self, from: data)) ?? []
+        }
         load()
         sync = PhoneSync(model: self)
     }
@@ -334,13 +344,15 @@ final class AppModel {
     }
 
     /// Keeps a list taken off this iPhone in Recently Deleted, as it was here but without its syncing. One with
-    /// nothing in it isn't worth keeping.
-    private func keepDeleted(_ note: Note, at now: Date = Date()) {
+    /// nothing in it isn't worth keeping. Gives back whether it was kept.
+    @discardableResult
+    private func keepDeleted(_ note: Note, at now: Date = Date()) -> Bool {
         var note = note.syncable
-        guard !note.items.isEmpty || note.name != nil else { return }
+        guard !note.items.isEmpty || note.name != nil else { return false }
         note.sync = nil
         recentlyDeleted = Self.kept([DeletedList(note: note, deleted: now)] + recentlyDeleted.filter { $0.id != note.id },
                                     now: now)
+        return true
     }
 
     /// Puts a deleted list back, at the top of the lists, and gives its id. It gets a new id and doesn't sync, so
@@ -413,12 +425,38 @@ final class AppModel {
         save()
     }
 
-    /// Takes away a list another device stopped sending here. It's kept in Recently Deleted as it was here.
-    func removeSynced(_ id: UUID) {
-        if let note = lists.first(where: { $0.id == id }) { keepDeleted(note) }
+    /// Takes away a list another device stopped sending here. It's kept in Recently Deleted as it was here, unless
+    /// there was nothing in it. Gives back what there is to say about it, but for which device did it.
+    @discardableResult
+    func removeSynced(_ id: UUID) -> TakenOff? {
+        guard let note = lists.first(where: { $0.id == id }) else { return nil }
+        let kept = keepDeleted(note)
         if undo(for: id) != nil { undoable = nil }
         lists.removeAll { $0.id == id }
         save()
+        return TakenOff(title: note.title, by: nil, kept: kept)
+    }
+
+    /// Other devices took these lists off this iPhone: kept to be said over the lists
+    func tookOff(_ lists: [TakenOff]) {
+        guard !lists.isEmpty else { return }
+        takenOff += lists
+        saveTakenOff()
+    }
+
+    /// The first `count` of `takenOff` have been said
+    func saidTakenOff(_ count: Int) {
+        guard count > 0, !takenOff.isEmpty else { return }
+        takenOff.removeFirst(min(count, takenOff.count))
+        saveTakenOff()
+    }
+
+    private func saveTakenOff() {
+        if takenOff.isEmpty {
+            defaults.removeObject(forKey: Keys.takenOff)
+        } else {
+            defaults.set(try? JSONEncoder().encode(takenOff), forKey: Keys.takenOff)
+        }
     }
 
     func remember(left id: UUID, at date: Date) {

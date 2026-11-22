@@ -82,14 +82,21 @@ struct SyncPass {
         var folder: String
     }
 
+    /// A list another device took this device off
+    struct Removal: Equatable {
+        var list: UUID
+        /// The device whose copy says so
+        var by: String
+    }
+
     /// What a pass found to do
     struct Changes: Equatable {
         /// The synced lists the merge changed, as they are now
         var merged: [Merged] = []
         /// Lists another device sends here, to add
         var added: [Note] = []
-        /// Lists another device took this device off, to take away
-        var removed: [UUID] = []
+        /// Lists another device took this device off, to take away. What this device had of them is its to keep.
+        var removed: [Removal] = []
         var writes: [Write] = []
         var deletes: [Delete] = []
     }
@@ -104,23 +111,26 @@ struct SyncPass {
     ///   - left: The lists this device stopped syncing, with when, so one deleted here doesn't come straight back.
     ///   - waiting: Lists that can't show changes just now, such as one with a task being dragged. One whose merge
     ///     would change what it shows is left for a later pass.
+    ///   - room: How many more lists this device takes from other devices without being asked. The ones past it
+    ///     wait in the folder, so a folder full of lists that aren't YANA's can't fill this device with them.
     mutating func run(lists: [Note], here: Set<UUID>, folders: [String], found: FoundLists, left: [UUID: Date] = [:],
-                      waiting: Set<UUID> = [], now: Date) -> Changes {
+                      waiting: Set<UUID> = [], room: Int = .max, now: Date) -> Changes {
         var changes = Changes()
         var here = here
+        var room = room
 
         for local in lists {
             guard local.kind == .list, let sync = local.sync, folders.contains(sync.folder),
                   let inFolder = found[sync.folder], let mine = SyncedList(local.syncable, device: device) else { continue }
             let copies = inFolder[local.id] ?? []
             let others = copies.filter { $0.device != device }
-            let merged = SyncMerge.merge([mine] + others, now: now)
+            let (merged, devicesBy) = SyncMerge.decide([mine] + others, now: now)
 
             // Another device took this one off the list
             guard merged.devices.contains(device) else {
                 written[local.id] = nil
                 here.remove(local.id)
-                changes.removed.append(local.id)
+                changes.removed.append(Removal(list: local.id, by: devicesBy))
                 changes.deletes.append(Delete(list: local.id, folder: sync.folder))
                 continue
             }
@@ -155,17 +165,27 @@ struct SyncPass {
                 guard !others.isEmpty else { continue }
                 // This device's own copy counts when there is one. After the list was deleted here, it's what says the
                 // list no longer comes here, until the other devices have heard and say so too.
-                let mine = copies.first { $0.device == device }
+                var mine = copies.first { $0.device == device }
+                var write: SyncedList?
+                if let wrong = mine, wrong.isAhead(of: now) {
+                    // Written while this device's date was wrong. It's written again with the dates it should have
+                    // had, or its say that the list left here would stand until the day it names.
+                    mine = wrong.restamped(at: now)
+                    write = mine
+                }
+                defer {
+                    if let write { changes.writes.append(Write(list: id, folder: folder, copy: write)) }
+                }
                 let merged = SyncMerge.merge([mine ?? SyncedList(device: device)] + others, now: now)
                 guard merged.devices.contains(device) else { continue }
                 if let when = left[id], merged.devicesChanged <= when {
                     // Read before this device's copy said it had left. And if a copy written before it left has
                     // landed after the one saying so, it says so again.
-                    if let mine, mine.devices.contains(device) {
-                        changes.writes.append(Write(list: id, folder: folder, copy: mine.leaving(at: when)))
-                    }
+                    if let mine, mine.devices.contains(device) { write = mine.leaving(at: when) }
                     continue
                 }
+                guard room > 0 else { continue }
+                room -= 1
                 let sync = SyncInfo(folder: folder, devices: merged.devices, devicesChanged: merged.devicesChanged,
                                     orderChanged: merged.orderChanged, deleted: merged.deleted,
                                     nameChanged: merged.nameChanged)
@@ -174,7 +194,7 @@ struct SyncPass {
                 here.insert(id)
                 if mine != merged {
                     written[id] = (merged, now)
-                    changes.writes.append(Write(list: id, folder: folder, copy: merged))
+                    write = merged
                 }
             }
         }
@@ -238,6 +258,39 @@ struct SyncPass {
             if !new.contains(where: { $0.id == card.id }) { new.append(card) }
         }
         return (before + new.map(\.id), new)
+    }
+}
+
+/// A list another device took this one off, to tell its user about. This device took it away as asked, and that's
+/// all it would otherwise show: a list gone.
+struct TakenOff: Codable, Equatable, Sendable {
+    /// The list's name or first task, as it was here
+    var title: String
+    /// The name of the device that took this one off it, when its card in the sync folder says
+    var by: String?
+    /// Whether what this device had of it went to Recently Deleted. A list with nothing in it doesn't.
+    var kept: Bool
+}
+
+extension Array where Element == TakenOff {
+    /// What to say about them, as an alert's title and text. Nil when there are none. `device` is “this Mac” or
+    /// “this iPhone”, and `place` says where its Recently Deleted is, like “in the … menu”.
+    func notice(on device: String, recentlyDeleted place: String) -> (title: String, text: String)? {
+        guard let first else { return nil }
+        let one = count == 1
+        let names = map { "“\($0.title)”" }
+        let title = one ? "\(names[0]) no longer syncs to \(device)" : "\(count) lists no longer sync to \(device)"
+        // The device that did it, when one device did it all and its card says who it is
+        let sender = Set(map(\.by)).count == 1 ? first.by : nil
+        let what = one ? "it" : names.formatted(.list(type: .and))
+        var text = "\(sender ?? (one ? "Another device" : "Your other devices")) stopped sending \(what) here."
+        if contains(where: \.kept) {
+            text += " What \(device) had\(one ? "" : " of them") stays in Recently Deleted for 30 days, \(place),"
+                + " where you can put \(one ? "it" : "them") back."
+        } else {
+            text += one ? " It had nothing in it." : " They had nothing in them."
+        }
+        return (title, text)
     }
 }
 

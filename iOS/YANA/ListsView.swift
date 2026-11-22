@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 /// The lists on this iPhone. Lists your Macs send here show up on their own; + starts one here. Touch and hold a list
 /// to rename it. A list whose sync folder can't be opened says so, and deleted lists wait in Recently Deleted at the
-/// bottom.
+/// bottom. When another device takes a list off this iPhone, an alert says which, and that it's in Recently Deleted.
 struct ListsView: View {
     @Environment(AppModel.self) private var model
     @State private var path: [UUID] = []
@@ -13,6 +13,8 @@ struct ListsView: View {
     @State private var problem: String?
     @State private var renaming: Note?
     @State private var newName = ""
+    /// The lists other devices took off this iPhone that the alert showing is about
+    @State private var takenOff: [TakenOff] = []
 
     /// What shows over the lists, one at a time
     enum Sheet: Identifiable {
@@ -102,6 +104,41 @@ struct ListsView: View {
                 Text(problem ?? "")
             }
         }
+        // Over whatever screen is showing, the list's own included, which only says the list is gone
+        .alert(takenOffNotice?.title ?? "", isPresented: isSayingTakenOff, presenting: takenOffNotice) { _ in
+            Button("OK") {}
+            if takenOff.contains(where: \.kept) {
+                Button("Show Recently Deleted") {
+                    path = []
+                    show(.deleted)
+                }
+            }
+        } message: { notice in
+            Text(notice.text)
+        }
+        .onChange(of: model.takenOff.count, initial: true) { sayTakenOff() }
+        .onChange(of: sheet?.id) { sayTakenOff() }
+        .onChange(of: addingFolder) { sayTakenOff() }
+    }
+
+    private var takenOffNotice: (title: String, text: String)? {
+        takenOff.notice(on: "this iPhone", recentlyDeleted: "under your lists")
+    }
+
+    /// Says which lists other devices took off this iPhone, once nothing else is over the lists
+    private func sayTakenOff() {
+        guard takenOff.isEmpty, sheet == nil, !addingFolder, !model.takenOff.isEmpty else { return }
+        takenOff = model.takenOff
+    }
+
+    /// The alert about lists taken off this iPhone is showing. Once it's dismissed, those have been said.
+    private var isSayingTakenOff: Binding<Bool> {
+        Binding(get: { !takenOff.isEmpty }, set: { showing in
+            guard !showing, !takenOff.isEmpty else { return }
+            model.saidTakenOff(takenOff.count)
+            takenOff = []
+            showOffer()
+        })
     }
 
     /// The lists, and Recently Deleted under them once something's in it
@@ -196,7 +233,8 @@ struct ListsView: View {
     }
 
     private func showOffer() {
-        guard sheet == nil, path.isEmpty, !addingFolder, let offer = model.offers.first else { return }
+        // After the alert about lists taken off this iPhone, if that's showing
+        guard takenOff.isEmpty, sheet == nil, path.isEmpty, !addingFolder, let offer = model.offers.first else { return }
         // Nothing left to send it by now
         guard !model.lists(notGoingTo: offer.device.id, in: offer.folder).isEmpty else {
             model.answered(offer)

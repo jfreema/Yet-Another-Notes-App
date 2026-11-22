@@ -16,6 +16,10 @@ import Foundation
 //
 // Anything added to a copy has to be optional, so a device on an older version still reads the newer copies (it skips
 // what it doesn't know), and a newer one reads the older copies. The list's name (1.8) was added that way.
+//
+// Anything that can write to the folder can put a file in it, and a device with the wrong date writes wrong dates. So
+// a file is only taken for what its name says it is, within `SyncLimits`, and a date well ahead of this device's clock
+// has no say in a merge (`SyncMerge.clockSlack`).
 
 /// How a synced list syncs, kept with it in Notes.json
 struct SyncInfo: Codable, Equatable, Sendable {
@@ -73,6 +77,35 @@ struct SyncedList: Codable, Equatable, Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(self)
     }
+
+    /// A device's copy of a list, from what's in lists/<list id>/<device id>.json. Nil if it isn't one YANA takes: not
+    /// a copy at all, past `SyncLimits`, or saying it's another device's. Each device writes only the file named for
+    /// it, so a file that says otherwise wasn't written by YANA.
+    static func read(_ data: Data, device: String) -> SyncedList? {
+        guard data.count <= SyncLimits.copyBytes,
+              let list = try? JSONDecoder().decode(SyncedList.self, from: data),
+              list.items.count <= SyncLimits.tasks,
+              list.device.caseInsensitiveCompare(device) == .orderedSame else { return nil }
+        return list
+    }
+}
+
+/// The most YANA takes from a sync folder. Its own lists are nowhere near these, so a file past them is skipped like
+/// one that isn't YANA's at all, before it can fill the memory or the screen.
+enum SyncLimits {
+    /// The most a device's copy of a list weighs, in bytes. A list of a thousand tasks is about a twentieth of it.
+    static let copyBytes = 4 * 1024 * 1024
+    /// The most tasks in a copy
+    static let tasks = 5_000
+    /// The most a device's card weighs, in bytes. One is a couple of hundred.
+    static let cardBytes = 16 * 1024
+
+    /// Whether a file is small enough to read, going by the size the file system gives. One whose size it won't give
+    /// is read, and checked again by what was read.
+    static func fits(_ file: URL, _ bytes: Int) -> Bool {
+        guard let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else { return true }
+        return size <= bytes
+    }
 }
 
 extension Note {
@@ -94,13 +127,36 @@ enum SyncMerge {
     /// How long a deletion is remembered. A device away for longer could bring a deleted task back.
     static let deletionsKept: TimeInterval = 90 * 24 * 60 * 60
 
+    /// How far ahead of this device's clock a date in a copy can be and still count. Clocks never agree exactly, and
+    /// one set by hand can be hours out, which syncs as it always has. Further ahead than this, the date is wrong:
+    /// written by a device whose date was wrong, or by something that isn't YANA. Since the latest change wins, such
+    /// a date would win over every change made after it, until the day it names.
+    static let clockSlack: TimeInterval = 24 * 60 * 60
+
+    /// Whether a date is too far ahead of `now` to be when anything happened
+    static func isAhead(_ date: Date, of now: Date) -> Bool {
+        date > now.addingTimeInterval(clockSlack)
+    }
+
     /// Merges copies of a list into one, taking each copy's device from the first, which is this device's copy and wins
     /// ties. The devices the list goes to are the latest change to them. Only those devices' copies count for the tasks,
     /// so a device that stopped syncing it can't bring back old ones. Each task is its latest change, unless it was
     /// deleted after that. The order is the latest copy to change it, with tasks it doesn't have yet after the task they
     /// follow in their own copy. The name is the latest one given, by a copy that says when.
+    ///
+    /// A date too far ahead of `now` doesn't count (`clockSlack`). In another device's copy, what's dated so has no
+    /// say: it loses to anything with a date that could be right, though a task only that copy has still comes over.
+    /// In this device's own copy it's dated `now` instead, since its clock is right by now and what it shows is what
+    /// its user last did.
     static func merge(_ copies: [SyncedList], now: Date) -> SyncedList {
-        guard let mine = copies.first else { return SyncedList(device: "") }
+        decide(copies, now: now).list
+    }
+
+    /// The merge, and the device whose copy had the last word on which devices the list goes to
+    static func decide(_ copies: [SyncedList], now: Date) -> (list: SyncedList, devicesBy: String) {
+        guard let first = copies.first else { return (SyncedList(device: ""), "") }
+        let mine = first.restamped(at: now)
+        let copies = [mine] + copies.dropFirst().map { $0.withoutFutureDates(at: now) }
         let devicesFrom = copies.max { $0.devicesChanged < $1.devicesChanged } ?? mine
         let devices = devicesFrom.devices
         let counted = [mine] + copies.dropFirst().filter { devices.contains($0.device) }
@@ -147,9 +203,59 @@ enum SyncMerge {
         // and when none do, this device's name stays
         let nameFrom = counted.max { ($0.nameChanged ?? .distantPast) < ($1.nameChanged ?? .distantPast) } ?? mine
 
-        return SyncedList(device: mine.device, items: order.compactMap { latest[$0] }, orderChanged: orderFrom.orderChanged,
-                          devices: devices, devicesChanged: devicesFrom.devicesChanged, deleted: deleted,
-                          name: Note.name(nameFrom.name), nameChanged: nameFrom.nameChanged)
+        let list = SyncedList(device: mine.device, items: order.compactMap { latest[$0] },
+                              orderChanged: orderFrom.orderChanged, devices: devices,
+                              devicesChanged: devicesFrom.devicesChanged, deleted: deleted,
+                              name: Note.name(nameFrom.name), nameChanged: nameFrom.nameChanged)
+        return (list, devicesFrom.device)
+    }
+}
+
+extension SyncedList {
+    /// Whether anything in it is dated too far ahead of `now` to count
+    func isAhead(of now: Date) -> Bool {
+        SyncMerge.isAhead(orderChanged, of: now) || SyncMerge.isAhead(devicesChanged, of: now)
+            || nameChanged.map { SyncMerge.isAhead($0, of: now) } == true
+            || deleted.values.contains { SyncMerge.isAhead($0, of: now) }
+            || items.contains { item in item.changed.map { SyncMerge.isAhead($0, of: now) } == true }
+    }
+
+    /// This device's own copy, with anything dated too far ahead of `now` dated `now`. Its date was wrong when it
+    /// wrote those, and they'd otherwise never reach the other devices, or once they had, never give way.
+    func restamped(at now: Date) -> SyncedList {
+        guard isAhead(of: now) else { return self }
+        let right = { (date: Date) in SyncMerge.isAhead(date, of: now) ? now : date }
+        var copy = self
+        copy.orderChanged = right(orderChanged)
+        copy.devicesChanged = right(devicesChanged)
+        copy.nameChanged = nameChanged.map(right)
+        copy.deleted = deleted.mapValues(right)
+        copy.items = items.map { item in
+            var item = item
+            item.changed = item.changed.map(right)
+            return item
+        }
+        return copy
+    }
+
+    /// Another device's copy, with anything dated too far ahead of `now` left without a date, so it has no say in a
+    /// merge: its order, its devices and its name lose to any other copy's, its deletions are left out, and its tasks
+    /// lose to any other copy of them.
+    func withoutFutureDates(at now: Date) -> SyncedList {
+        guard isAhead(of: now) else { return self }
+        let ahead = { (date: Date) in SyncMerge.isAhead(date, of: now) }
+        var copy = self
+        if ahead(orderChanged) { copy.orderChanged = .distantPast }
+        if ahead(devicesChanged) { copy.devicesChanged = .distantPast }
+        if let nameChanged, ahead(nameChanged) { copy.nameChanged = nil }
+        copy.deleted = deleted.filter { !ahead($0.value) }
+        copy.items = items.map { item in
+            guard let changed = item.changed, ahead(changed) else { return item }
+            var item = item
+            item.changed = nil
+            return item
+        }
+        return copy
     }
 }
 
@@ -158,4 +264,12 @@ struct DeviceCard: Codable, Equatable, Sendable {
     var id: String
     var name: String
     var seen: Date
+
+    /// A device's card, from what's in devices/<device id>.json. Nil if it isn't one YANA takes: not a card, too
+    /// big, or saying it's another device's.
+    static func read(_ data: Data, device: String) -> DeviceCard? {
+        guard data.count <= SyncLimits.cardBytes, let card = try? JSONDecoder().decode(DeviceCard.self, from: data),
+              card.id.caseInsensitiveCompare(device) == .orderedSame else { return nil }
+        return card
+    }
 }

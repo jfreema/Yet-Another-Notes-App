@@ -20,6 +20,8 @@ struct ListSyncTests {
         var offered: [(device: DeviceCard, folder: SyncFolder)] = []
         /// How many times it was told a folder stopped or started being readable
         var stateChanges = 0
+        /// How many times it was told another device took lists off this Mac
+        var tookOffs = 0
 
         init(_ pages: [NotePage]) {
             notePages = pages
@@ -27,6 +29,10 @@ struct ListSyncTests {
 
         func syncStateChanged() {
             stateChanges += 1
+        }
+
+        func tookOff() {
+            tookOffs += 1
         }
 
         func offer(_ device: DeviceCard, in folder: SyncFolder) {
@@ -515,5 +521,140 @@ struct ListSyncTests {
         try card(pad, "iPad")
         await sync.pass()
         #expect(host.offered.count == 1)
+    }
+
+    // MARK: What a sync folder can't do
+
+    @Test func saysWhichDeviceTookAListOffThisMac() async throws {
+        defer { cleanUp() }
+        let milk = ToDo(text: "Milk", changed: earlier)
+        let (list, _) = makeList([milk])
+        let host = Host([list])
+        let sync = try syncing(host)
+        try card(air, "MacBook Air")
+        await theirs(list.id, [milk])
+        await sync.pass()
+        #expect(sync.takenOff.isEmpty)
+
+        // Unticked for this Mac on the MacBook Air
+        let off = SyncedList(device: air, items: [milk], orderChanged: earlier, devices: [air], devicesChanged: Date())
+        let wrote = await SyncFiles().write(off, to: folder.copy(of: list.id, by: air))
+        #expect(wrote)
+        await sync.pass()
+        // The tab goes, as it asked, and there's something to say about it
+        #expect(host.notePages.isEmpty)
+        #expect(host.tookOffs == 1)
+        #expect(sync.takenOff == [TakenOff(title: "Milk", by: "MacBook Air", kept: true)])
+        let copy = folder.copy(of: list.id, by: me).path
+        try await until("this Mac's copy is deleted") { !FileManager.default.fileExists(atPath: copy) }
+        // Once, however many passes follow
+        await sync.pass()
+        #expect(sync.takenOff.count == 1)
+
+        // It's still to be said if YANA is reopened before the note was showing, and not after it's been said
+        #expect(reopened(host).takenOff == sync.takenOff)
+        sync.saidTakenOff()
+        #expect(sync.takenOff.isEmpty)
+        #expect(reopened(host).takenOff.isEmpty)
+    }
+
+    @Test func aCopyDatedInTheFutureHasNoSay() async throws {
+        defer { cleanUp() }
+        let milk = ToDo(text: "Milk", changed: earlier)
+        let (list, _) = makeList([milk])
+        let host = Host([list])
+        let sync = try syncing(host)
+        // Dated ten days from now, which no clock that's nearly right gives: it takes this Mac off the list, and
+        // changes its task
+        let later = Date().addingTimeInterval(10 * 24 * 60 * 60)
+        let wrong = SyncedList(device: air, items: [ToDo(id: milk.id, text: "Oat milk", changed: later)],
+                               orderChanged: later, devices: [air], devicesChanged: later)
+        let wrote = await SyncFiles().write(wrong, to: folder.copy(of: list.id, by: air))
+        #expect(wrote)
+        await sync.pass()
+        await sync.pass()
+        #expect(host.notePages.count == 1)
+        #expect(list.note.items.map(\.text) == ["Milk"])
+        #expect(sync.takenOff.isEmpty)
+        let copy = try mine(list.id)
+        #expect(Set(copy.devices) == [me, air])
+        #expect(copy.items.map(\.text) == ["Milk"])
+    }
+
+    @Test func thisMacsOwnDatesFromTheFutureBecomeNow() async throws {
+        defer { cleanUp() }
+        // Changed while this Mac's date was ten days out
+        let later = Date().addingTimeInterval(10 * 24 * 60 * 60)
+        let (list, _) = makeList([ToDo(text: "Milk", changed: later)])
+        list.sync?.devicesChanged = later
+        let host = Host([list])
+        let sync = try syncing(host)
+        await theirs(list.id, [])
+        await sync.pass()
+        let now = Date()
+        let copy = try mine(list.id)
+        #expect(copy.items.map(\.text) == ["Milk"])
+        #expect(copy.items.allSatisfy { ($0.changed ?? later) <= now })
+        #expect(copy.devicesChanged <= now)
+        #expect((list.sync?.devicesChanged ?? later) <= now)
+        // And the next change here is the later one, as it should be
+        list.show([ToDo(id: copy.items[0].id, text: "Oat milk", changed: copy.items[0].changed)])
+        await sync.pass()
+        let next = try mine(list.id)
+        #expect(next.items.map(\.text) == ["Oat milk"])
+        #expect((next.items[0].changed ?? .distantPast) > (copy.items[0].changed ?? later))
+    }
+
+    @Test func skipsAFileThatIsntWhatItsNameSaysOrIsTooBig() async throws {
+        defer { cleanUp() }
+        let milk = ToDo(text: "Milk", changed: earlier)
+        let (list, _) = makeList([milk])
+        let host = Host([list])
+        let sync = try syncing(host)
+        let soon = Date()
+
+        // In the file named for the MacBook Air, a copy that says it's another device's and takes this Mac off
+        let other = UUID().uuidString
+        let forged = SyncedList(device: other, items: [], orderChanged: soon, devices: [other], devicesChanged: soon)
+        try FileManager.default.createDirectory(at: folder.listFolder(list.id), withIntermediateDirectories: true)
+        try forged.encoded().write(to: folder.copy(of: list.id, by: air))
+        await sync.pass()
+        #expect(host.notePages.count == 1)
+
+        // A copy with more tasks than any list of YANA's, which would be a tab that never finishes drawing
+        let many = (0...SyncLimits.tasks).map { ToDo(text: "Task \($0)", changed: soon) }
+        let huge = SyncedList(device: air, items: many, orderChanged: soon, devices: [me, air], devicesChanged: soon)
+        try huge.encoded().write(to: folder.copy(of: list.id, by: air))
+        await sync.pass()
+        #expect(list.note.items.map(\.text) == ["Milk"])
+
+        // And a file too big to be a copy at all, which isn't even read
+        try Data(count: SyncLimits.copyBytes + 1).write(to: folder.copy(of: list.id, by: air))
+        await sync.pass()
+        #expect(list.note.items.map(\.text) == ["Milk"])
+        #expect(Set(try mine(list.id).devices) == [me, air])
+
+        // The real thing still syncs
+        await theirs(list.id, [milk, ToDo(text: "Eggs", changed: soon)])
+        await sync.pass()
+        #expect(list.note.items.map(\.text) == ["Milk", "Eggs"])
+    }
+
+    @Test func takesNoMoreListsThanItHasRoomFor() async throws {
+        defer { cleanUp() }
+        let host = Host([])
+        let sync = try syncing(host)
+        // More lists sent here than YANA's own lists ever come to
+        for number in 0..<(ListSync.mostTabs + 3) {
+            await theirs(UUID(), [ToDo(text: "List \(number)", changed: earlier)])
+        }
+        await sync.pass()
+        #expect(host.notePages.count == ListSync.mostTabs)
+        await sync.pass()
+        #expect(host.notePages.count == ListSync.mostTabs)
+        // Once there's room again, more come
+        host.notePages.removeFirst(3)
+        await sync.pass()
+        #expect(host.notePages.count == ListSync.mostTabs)
     }
 }

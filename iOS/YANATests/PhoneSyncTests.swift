@@ -9,6 +9,8 @@ import Testing
 struct PhoneSyncTests {
     let root: URL
     let model: AppModel
+    /// What this iPhone remembers between launches, kept away from YANA's own settings
+    let defaults: UserDefaults
     let mac = UUID().uuidString
     let earlier = Date(timeIntervalSinceNow: -60)
 
@@ -16,7 +18,7 @@ struct PhoneSyncTests {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let folderURL = root.appendingPathComponent("YANA Sync", isDirectory: true)
         try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
-        let defaults = try #require(UserDefaults(suiteName: "YANATests-" + UUID().uuidString))
+        defaults = try #require(UserDefaults(suiteName: "YANATests-" + UUID().uuidString))
         model = AppModel(storage: root.appendingPathComponent("Lists.json"), defaults: defaults)
         try model.addFolder(folderURL)
         model.sync.writeSettles = 0
@@ -391,6 +393,116 @@ struct PhoneSyncTests {
         #expect(model.list(sent.list) == nil)
         // As it was here
         #expect(model.recentlyDeleted.first?.note.items.map(\.text) == ["Milk", "Eggs"])
+    }
+
+    // MARK: What a sync folder can't do
+
+    @Test func saysWhichDeviceTookAListOffThisIPhone() async throws {
+        let sent = try await sentFromMac()
+        try writeCard(DeviceCard(id: mac, name: "MacBook Air", seen: earlier))
+        #expect(model.takenOff.isEmpty)
+        try writeMacCopy(of: sent.list, SyncedList(device: mac, items: [ToDo(id: sent.milk, text: "Milk", changed: earlier)],
+                                                   orderChanged: earlier, devices: [mac], devicesChanged: Date()))
+        await model.sync.flush()
+        #expect(model.list(sent.list) == nil)
+        // There's something to say about it, once, however many passes follow
+        #expect(model.takenOff == [TakenOff(title: "Milk", by: "MacBook Air", kept: true)])
+        await model.sync.flush()
+        #expect(model.takenOff.count == 1)
+
+        // It's still to be said if YANA is reopened first, and not once it has been
+        let storage = root.appendingPathComponent("Lists.json")
+        #expect(AppModel(storage: storage, defaults: defaults).takenOff == model.takenOff)
+        model.saidTakenOff(1)
+        #expect(model.takenOff.isEmpty)
+        #expect(AppModel(storage: storage, defaults: defaults).takenOff.isEmpty)
+    }
+
+    @Test func aListWithNothingInItThatsTakenOffSaysSoToo() async throws {
+        let list = UUID()
+        try writeMacCopy(of: list, SyncedList(device: mac, items: [], orderChanged: earlier,
+                                              devices: [mac, model.device], devicesChanged: earlier))
+        await model.sync.flush()
+        #expect(model.list(list) != nil)
+        try writeMacCopy(of: list, SyncedList(device: mac, items: [], orderChanged: earlier, devices: [mac],
+                                              devicesChanged: Date()))
+        await model.sync.flush()
+        #expect(model.list(list) == nil)
+        // Nothing to keep, and no card to say which device it was
+        #expect(model.recentlyDeleted.isEmpty)
+        #expect(model.takenOff == [TakenOff(title: "New List", by: nil, kept: false)])
+    }
+
+    @Test func aCopyDatedInTheFutureHasNoSay() async throws {
+        let sent = try await sentFromMac()
+        // Dated ten days from now, which no clock that's nearly right gives: it takes this iPhone off the list, and
+        // changes a task
+        let later = Date().addingTimeInterval(10 * 24 * 60 * 60)
+        try writeMacCopy(of: sent.list, SyncedList(device: mac, items: [ToDo(id: sent.milk, text: "Oat milk", changed: later)],
+                                                   orderChanged: later, devices: [mac], devicesChanged: later))
+        await model.sync.flush()
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+        #expect(model.takenOff.isEmpty && model.recentlyDeleted.isEmpty)
+        let mine = try myCopy(of: sent.list)
+        #expect(Set(mine.devices) == [mac, model.device])
+        #expect(mine.items.map(\.text) == ["Milk", "Eggs"])
+
+        // A change here after it wins, where it used to lose until that date came
+        _ = model.enter("Soy milk", in: sent.milk, of: sent.list)
+        await model.sync.flush()
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Soy milk", "Eggs"])
+        #expect(try myCopy(of: sent.list).items.map(\.text) == ["Soy milk", "Eggs"])
+    }
+
+    @Test func skipsAFileThatIsntWhatItsNameSaysOrIsTooBig() async throws {
+        let sent = try await sentFromMac()
+        let file = folder.copy(of: sent.list, by: mac)
+        let soon = Date()
+
+        // In the file named for the Mac, a copy that says it's another device's and takes this iPhone off
+        let other = UUID().uuidString
+        try SyncedList(device: other, items: [], orderChanged: soon, devices: [other], devicesChanged: soon)
+            .encoded().write(to: file)
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+
+        // A copy with more tasks than any list of YANA's
+        let many = (0...SyncLimits.tasks).map { ToDo(text: "Task \($0)", changed: soon) }
+        try SyncedList(device: mac, items: many, orderChanged: soon, devices: [mac, model.device], devicesChanged: soon)
+            .encoded().write(to: file)
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+
+        // And a file too big to be a copy at all, which isn't even read
+        try Data(count: SyncLimits.copyBytes + 1).write(to: file)
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk", "Eggs"])
+        #expect(model.takenOff.isEmpty)
+
+        // The real thing still syncs
+        try writeMacCopy(of: sent.list, SyncedList(
+            device: mac,
+            items: [ToDo(id: sent.milk, text: "Milk", changed: earlier),
+                    ToDo(id: sent.eggs, text: "Eggs", done: true, changed: earlier), ToDo(text: "Jam", changed: soon)],
+            orderChanged: soon, devices: [mac, model.device], devicesChanged: earlier))
+        await model.sync.flush()
+        #expect(texts(sent.list) == ["Milk", "Eggs", "Jam"])
+    }
+
+    @Test func aCardThatIsntItsDevicesOwnIsntADevice() async throws {
+        try writeCard(DeviceCard(id: mac, name: "MacBook Air", seen: earlier))
+        // A card in a file named for another device, and one far bigger than a card gets
+        let forged = folder.card(of: UUID().uuidString)
+        try JSONEncoder().encode(DeviceCard(id: mac, name: "Not the MacBook Air", seen: Date())).write(to: forged)
+        let big = UUID().uuidString
+        let long = String(repeating: "x", count: SyncLimits.cardBytes)
+        try JSONEncoder().encode(DeviceCard(id: big, name: long, seen: Date())).write(to: folder.card(of: big))
+        // This iPhone's own card is there too, once it has synced
+        await model.sync.flush()
+        let devices = await model.sync.devices(in: folder)
+        #expect(devices.filter { $0.id != model.device }.map(\.name) == ["MacBook Air"])
     }
 
     @Test func undoPutsADeletedTaskBackHereAndOnTheMac() async throws {

@@ -36,10 +36,10 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 | A text tab's line numbers (an `NSRulerView`), and where each line starts, kept up to date edit by edit | `LineNumbers`, `LineIndex` |
 | A to-do list tab, its rows, their numbers, wrapping a long task, and dragging them | `TodoList` |
 | What a tab holds, and the change times a synced list keeps (`Note.stamped`) | `Note` |
-| Syncing lists: what's in a sync folder, and merging copies (shared with YANA for iPhone) | `SyncFormat` |
-| Syncing lists: what one pass does with the lists here and the copies in the folders, where things are in a folder (shared with YANA for iPhone) | `SyncPass` |
+| Syncing lists: what's in a sync folder, what YANA takes from one (`SyncLimits`), and merging copies (shared with YANA for iPhone) | `SyncFormat` |
+| Syncing lists: what one pass does with the lists here and the copies in the folders, where things are in a folder, and what to say when a list is taken off this device (shared with YANA for iPhone) | `SyncPass` |
 | Syncing lists: the sync folders this Mac uses, this Mac's id | `SyncModel` |
-| Syncing lists: reading the folders when they change, showing what `SyncPass` works out (adding or taking away tabs), whether each list is syncing, a folder's lists to bring here, and noticing a new device | `ListSync` |
+| Syncing lists: reading the folders when they change, showing what `SyncPass` works out (adding or taking away tabs), whether each list is syncing, a folder's lists to bring here, noticing a new device, and the lists other devices took off this Mac | `ListSync` |
 | Syncing lists: hearing when something changes in a sync folder (FSEvents) | `FolderWatcher` |
 | Sync This List…: the folder and the devices a list goes to | `SyncSheet` |
 | Saving the notes to `Notes.json`, and Recently Deleted | `NoteStore` |
@@ -118,6 +118,33 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   iPhone builds) read and write copies as before: a copy without `nameChanged` never changes the name.
 - **New fields in a copy have to be optional.** Older versions skip keys they don't know, and `format` isn't checked,
   so a change that older versions can't skip would need a new folder layout, not just a new field.
+- **A sync folder isn't trusted.** Anything that can write to it can put a file there, and nothing signs a copy, so
+  the aim is that no file can lose a list for good or lock one up, not that none can change one. Four things do it,
+  all in the shared code so both apps have them:
+  - *A file is only what its name says.* `SyncedList.read` and `DeviceCard.read` skip a copy or a card whose
+    `device` or `id` isn't the device its file is named for, one past `SyncLimits` (4 MB or 5,000 tasks for a copy,
+    16 KB for a card), and anything that doesn't decode. The readers check the size the file system gives before
+    reading (`SyncLimits.fits`), so a huge file is never read. This device's own copy isn't held to the limits when
+    it's written: a list that big would stop syncing without saying so, which no list of YANA's comes near.
+  - *A date well ahead of this device's clock has no say* (`SyncMerge.clockSlack`, a day, so clocks set a few hours
+    out sync as they always have). The latest change wins, so a copy dated next year used to win over every change
+    until then, and a device taken off a list that way couldn't be put back. `SyncMerge.decide` now reads another
+    device's copy `withoutFutureDates`: its devices, order and name lose to any other copy's, its deletions are left
+    out, and its tasks lose to any other copy of them, though a task only it has still comes over, undated. This
+    device's own copy is `restamped` instead, to now: its date was wrong when it made those changes, its user is
+    looking at them, and dated now they reach the other devices. The same goes for a list it left
+    (`ListSync.left`, the iPhone's `AppModel.left`) and for the copy saying it left, which `SyncPass.run` writes
+    again. The cost: a device whose date is still more than a day ahead gets the others' changes, but its own
+    changes to tasks they have don't reach them until its date is right or that day comes.
+  - *A list taken off this device is kept, and it says so.* The tab or list goes, since unticking a device is how
+    a list is taken off it, but what was here goes to Recently Deleted, and `SyncPass.Removal` says which device's
+    copy did it. `ListSync.takenOff` (the iPhone's `AppModel.takenOff`) holds a `TakenOff` for each, named from the
+    folder's cards and kept in UserDefaults (`syncTakenOff`) until it's been said. The Mac says it in a sheet the
+    next time the note is showing with nothing over it (`NoteWindowController.showOffers`, before any offer), so
+    YANA still never opens by itself. `[TakenOff].notice` words it for both apps.
+  - *Lists sent here stop at a number* (`ListSync.mostTabs`, 20; `AppModel.mostLists`, 200), passed to
+    `SyncPass.run` as `room`. The ones past it wait in the folder and come when there's room. Until 1.9.2 a list
+    naming this Mac got a tab however many there were.
 - **Other devices' changes show at once, cursor in a task or not.** `TodoList.show(_:)` keeps the row of every task
   that's still there, so the one being edited keeps its cursor and what's typed, unless another device changed or
   deleted that very task. Empty tasks just opened stay where they are (`[ToDo].showing`), since they aren't synced.
@@ -141,7 +168,8 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   (`ListSync.pass()` is one awaited pass, and `ListSync.folders` gives it the test's folder). They put the cursor in
   a task with `makeFirstResponder`, which works on the runner without showing the window.
 - **Starting to sync gives the list a new id**, so files left from an earlier time it synced don't mix in. Stopping
-  writes an empty copy without this Mac in its devices; being taken off by another device deletes this Mac's copy.
+  writes an empty copy without this Mac in its devices; being taken off by another device deletes this Mac's copy,
+  keeps the list in Recently Deleted, and says so (see *A sync folder isn't trusted*).
   That empty copy is what keeps a list whose tab was deleted from coming back: finding lists in a folder counts this
   Mac's own copy too, and `ListSync.left` covers the moment before the copy is written. `left` is kept in
   UserDefaults (`syncLeft`) for as long as a deleted task is, so if an older copy of this Mac's lands late, after
@@ -174,10 +202,10 @@ setup and user guide.
 | Area | Files |
 |---|---|
 | Launch, and syncing as YANA comes and goes | `YANAApp`, `AppModel.became` |
-| The lists, the folders, this iPhone's id and name, saving to `Lists.json`, Recently Deleted, Undo for deleted tasks, whether a list is syncing, and a new device to offer lists to | `AppModel` |
+| The lists, the folders, this iPhone's id and name, saving to `Lists.json`, Recently Deleted, Undo for deleted tasks, whether a list is syncing, a new device to offer lists to, and the lists other devices took off this iPhone | `AppModel` |
 | Editing a list: Return in a task, empty tasks, change times | `Note+Phone` |
-| Syncing: reading the folders when they change, the same passes as the Mac (`SyncPass`), a folder's lists to bring here, and joining them | `PhoneSync` |
-| Reading and writing the folders, iCloud Drive downloads | `PhoneFiles` |
+| Syncing: reading the folders when they change, the same passes as the Mac (`SyncPass`), a folder's lists to bring here, joining them, and which device took a list off this iPhone | `PhoneSync` |
+| Reading and writing the folders, iCloud Drive downloads, skipping files that aren't what their names say or are too big | `PhoneFiles` |
 | A sync folder: its bookmark, and its paths | `Folders` |
 | The screens | `ListsView`, `ListView`, `SyncSettingsView`, `SettingsView`, `FolderListsView`, `DeletedListsView`, `Look` |
 
@@ -212,6 +240,11 @@ setup and user guide.
 - **Recently Deleted is in `Lists.json`** (`Saved.deleted`, optional so older builds read the file). It gets a list
   deleted here and one another device took off this iPhone, as it was here and without its syncing, for 30 days, 50
   at most. Putting one back gives it a new id, as on the Mac.
+- **A list another device takes off this iPhone is said in an alert** (`ListsView`, from `AppModel.takenOff`), over
+  whatever screen is showing, with a button to Recently Deleted when something was kept. It's put on the
+  `NavigationStack`, not the list of lists, so it shows over the list's own screen too, which by then only says
+  List Removed. It waits for a sheet to close, and an offer to a new device waits for it. The model forgets them
+  only once the alert is dismissed, so one that couldn't show is said the next time YANA opens.
 - **Adding a folder shows its lists** (`FolderListsView`, from `PhoneSync.lists(in:)`), and `join` brings the ones
   switched on here the way the Mac's `ListSync.join` does. It reads the folder again after each sync pass while it's
   showing, since iCloud Drive may still be downloading what's in it. Tapping a folder in Settings shows them again.
