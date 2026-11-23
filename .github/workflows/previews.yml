@@ -102,11 +102,18 @@ jobs:
           for test in json.load(open(os.path.join(src, "manifest.json"))):
               for a in test.get("attachments", []):
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
-                  if not name.startswith("highlight"):
+                  if not (name.startswith("highlight") or name.startswith("Complete Issue")
+                          or name.startswith("UI Snapshot")):
                       continue
-                  shutil.copy(os.path.join(src, a["exportedFileName"]), os.path.join(dst, "ui-" + name.replace(" ", "_")))
+                  path = os.path.join(src, a["exportedFileName"])
+                  kind = open(path, "rb").read(8)
+                  ext = ".png" if kind.startswith(b"\x89PNG") else ".jpg" if kind.startswith(b"\xff\xd8") else ""
+                  if name.endswith((".png", ".txt", ".jpg")):
+                      ext = ""
+                  shutil.copy(path, os.path.join(dst, "ui-" + name.replace(" ", "_").replace(":", "") + ext))
           PY
           grep -E "Test Case .* (passed|failed)" "$RUNNER_TEMP/ui.log" || true
+          grep -E "error: " "$RUNNER_TEMP/ui.log" | cut -c1-400 || true
           ls -la "$out"
       - uses: actions/upload-artifact@v4
         if: always()
