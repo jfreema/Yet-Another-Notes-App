@@ -1,0 +1,5 @@
+Query chain:
+ →Find: Target Application 'io.github.jfreema.yana.ios'
+  ↪︎Find: Descendants matching type Any
+    ↪︎Find: Elements matching predicate 'label == "Remove Highlight"'
+      ↪︎Find: First Match
