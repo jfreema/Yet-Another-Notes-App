@@ -91,11 +91,6 @@ final class ListUITests: XCTestCase {
         XCTAssertFalse(undo.exists)
     }
 
-    /// Something in the menu touching and holding a task shows, by what it says
-    func menuItem(_ label: String) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-    }
-
     /// Waits for what an element's value says to match, as VoiceOver would read it
     func waitFor(_ element: XCUIElement, value format: String, _ value: String) -> Bool {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: format, value), object: element)
@@ -111,22 +106,36 @@ final class ListUITests: XCTestCase {
         add(shot)
     }
 
-    func testTouchAndHoldHighlightsATask() {
-        task("Coffee beans").press(forDuration: 1.2)
-        let green = menuItem("Green")
+    /// Swipes a task right and opens its highlighter colors. A long swipe opens them straight away, and a short one
+    /// shows the Highlight button first.
+    func openColors(of text: String) {
+        row(text).swipeRight()
+        let green = app.buttons["Green"]
+        if !green.waitForExistence(timeout: 2) {
+            let highlight = app.buttons["Highlight"]
+            XCTAssertTrue(highlight.waitForExistence(timeout: 5), app.debugDescription)
+            shoot("highlight-swiped")
+            highlight.tap()
+        }
         XCTAssertTrue(green.waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertFalse(menuItem("Remove Highlight").exists)
-        shoot("highlight-menu")
-        green.tap()
+        sleep(1)
+    }
+
+    func testSwipingRightHighlightsATask() {
+        openColors(of: "Coffee beans")
+        XCTAssertFalse(app.buttons["Remove Highlight"].isEnabled)
+        shoot("highlight-picker")
+        app.buttons["Green"].tap()
         XCTAssertTrue(waitFor(task("Coffee beans"), value: "value == %@", "Green highlight"), app.debugDescription)
+        XCTAssertFalse(app.buttons["Green"].exists)
         sleep(1)
         shoot("highlighted")
 
         // And taken off again
-        task("Coffee beans").press(forDuration: 1.2)
-        let remove = menuItem("Remove Highlight")
-        XCTAssertTrue(remove.waitForExistence(timeout: 5), app.debugDescription)
-        shoot("highlight-menu-again")
+        openColors(of: "Coffee beans")
+        let remove = app.buttons["Remove Highlight"]
+        XCTAssertTrue(remove.isEnabled, app.debugDescription)
+        shoot("highlight-picker-again")
         remove.tap()
         XCTAssertTrue(waitFor(task("Coffee beans"), value: "NOT (value == %@)", "Green highlight"),
                       app.debugDescription)

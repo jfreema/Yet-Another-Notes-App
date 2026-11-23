@@ -88,7 +88,7 @@ jobs:
           xcrun simctl ui "$udid" appearance light
           TEST_RUNNER_YANA_SHOTS=1 xcodebuild test -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
             -derivedDataPath "$RUNNER_TEMP/dd" -resultBundlePath "$RUNNER_TEMP/ui.xcresult" \
-            -only-testing:YANAUITests/ListUITests/testTouchAndHoldHighlightsATask \
+            -only-testing:YANAUITests/ListUITests/testSwipingRightHighlightsATask \
             -only-testing:YANAUITests/ListUITests/testTouchAndHoldDragsATask 2>&1 \
             | tee "$RUNNER_TEMP/ui.log" | xcbeautify --renderer github-actions || echo "::warning::UI tests failed"
           mkdir -p "$RUNNER_TEMP/attachments"
@@ -102,6 +102,8 @@ jobs:
           for test in json.load(open(os.path.join(src, "manifest.json"))):
               for a in test.get("attachments", []):
                   name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  if not name.startswith("highlight"):
+                      continue
                   shutil.copy(os.path.join(src, a["exportedFileName"]), os.path.join(dst, "ui-" + name.replace(" ", "_")))
           PY
           grep -E "Test Case .* (passed|failed)" "$RUNNER_TEMP/ui.log" || true
@@ -126,6 +128,6 @@ jobs:
           ls -R previews/out | head -50
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add previews/out
+          git add -A previews/out
           git commit -m "TEMPORARY: previews of highlighted tasks" || exit 0
           for i in 1 2 3; do git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break; sleep 5; done

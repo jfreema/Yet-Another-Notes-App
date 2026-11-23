@@ -197,9 +197,9 @@ struct TodoListTests {
         let milk = ToDo(text: "Milk"), eggs = ToDo(text: "Eggs")
         let list = TodoList(items: [milk, eggs])
         let window = show(list)
-        let row = try #require(row("Milk", in: list))
-        #expect(window.makeFirstResponder(row.field))
-        let editor = try #require(row.field.currentEditor() as? NSTextView)
+        let edited = try #require(row("Milk", in: list))
+        #expect(window.makeFirstResponder(edited.field))
+        let editor = try #require(edited.field.currentEditor() as? NSTextView)
         editor.setSelectedRange(NSRange(location: 2, length: 0))
 
         var yellow = milk
@@ -207,7 +207,7 @@ struct TodoListTests {
         yellow.highlightChanged = Date()
         list.show([yellow, eggs])
         // Still being edited, with the cursor where it was, and now yellow
-        #expect(row.field.currentEditor() === editor)
+        #expect(edited.field.currentEditor() === editor)
         #expect(editor.selectedRange() == NSRange(location: 2, length: 0))
         #expect(list.note.items.map(\.highlight) == [.yellow, nil])
     }

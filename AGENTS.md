@@ -254,10 +254,11 @@ setup and user guide.
   for it and reads it on a later pass, rather than waiting. One that's out of date is asked for and read as it is.
 - **Empty tasks aren't saved or synced**, as on the Mac. `Note.syncable` leaves them out, `Note.stamped(after:at:)`
   stamps a change made here without counting them, and `[ToDo].showing` keeps them in place when a merge comes in.
-- **Touching and holding a task shows its highlight menu** (`ListView.highlightMenu`, a `.contextMenu` with a
-  `.palette` picker of the colors), and moving the finger then drags it, as the list of lists does with Rename. A
-  task's row background (`Look.rowBackground`) is its highlight, from the same numbers as the Mac's. The sample
-  lists have a few, for screenshots.
+- **Swiping a task right picks its highlight** (a leading swipe action, then `HighlightPicker` in a sheet), not
+  touching and holding it: a `.contextMenu` on a task took touch and hold from dragging (the drag UI test failed every
+  time with one). A row with swipe actions of its own gets no Delete from `.onDelete`, so the trailing swipe's Delete
+  is written out too. A task's row background (`Look.rowBackground`) is its highlight, from the same numbers as the
+  Mac's. The sample lists have a few, for screenshots.
 - **Return arrives as a new line in a task's text** (its `TextField` is vertical so long tasks wrap). `Note.enter`
   turns it into a new task the way Return works on the Mac.
 - **Starting to sync gives the list a new id**, as on the Mac. `AppModel` remembers the old id, so the list's screen

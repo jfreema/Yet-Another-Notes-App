@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// A list's tasks, numbered like on the Mac. Tap a circle to check a task off, tap its text to change it, and press
-/// Return in a task to start a new one below it. Touch and hold a task to give its line a highlighter color, or move
-/// your finger to drag it into a new order (or use Edit), and swipe one to delete it, with Undo for a few seconds
-/// after. Rename… in the … menu names the list. A list that has stopped syncing says so at the top.
+/// Return in a task to start a new one below it. Touch and hold a task to drag it into a new order (or use Edit),
+/// swipe one left to delete it, with Undo for a few seconds after, and swipe one right to give its line a highlighter
+/// color. Rename… in the … menu names the list. A list that has stopped syncing says so at the top.
 struct ListView: View {
     let listID: UUID
     @Environment(AppModel.self) private var model
@@ -19,6 +19,12 @@ struct ListView: View {
     /// The task showing a text field to type in. The others show plain text, so touching and holding one drags it
     /// instead of selecting its text.
     @State private var editing: UUID?
+    /// The task whose highlighter color is being picked
+    @State private var highlighting: Picking?
+
+    struct Picking: Identifiable {
+        let id: UUID
+    }
 
     enum Field: Hashable {
         case task(UUID)
@@ -79,8 +85,22 @@ struct ListView: View {
                     go(to: .task(item.id))
                 }
                 .listRowBackground(look.rowBackground(item.highlight))
-                .contextMenu {
-                    highlightMenu(for: item)
+                // Not a menu on touch and hold, which would take it from dragging
+                .swipeActions(edge: .leading) {
+                    Button {
+                        highlighting = Picking(id: item.id)
+                    } label: {
+                        Label("Highlight", systemImage: "highlighter")
+                    }
+                    .tint(.indigo)
+                }
+                // Swipe actions of its own leave out the Delete that onDelete gives, so it's here too
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        model.deleteTasks(at: [index], in: listID)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 }
             }
             .onDelete { model.deleteTasks(at: $0, in: listID) }
@@ -148,6 +168,14 @@ struct ListView: View {
         .sheet(isPresented: $showingSync) {
             SyncSettingsView(listID: listID)
         }
+        .sheet(item: $highlighting) { picking in
+            if let task = model.list(listID)?.items.first(where: { $0.id == picking.id }) {
+                HighlightPicker(task: task) { color in
+                    model.highlight(task.id, in: listID, with: color)
+                    highlighting = nil
+                }
+            }
+        }
         .renameAlert($renaming, name: $newName, model: model)
         .confirmationDialog("Clear the \(checked) checked tasks?", isPresented: $confirmingClear,
                             titleVisibility: .visible) {
@@ -204,32 +232,6 @@ struct ListView: View {
             }
         } label: {
             Label("More", systemImage: "ellipsis.circle")
-        }
-    }
-
-    /// What touching and holding a task shows: a row of highlighter colors, with the task's own picked, and Remove
-    /// Highlight once it has one
-    @ViewBuilder
-    private func highlightMenu(for item: ToDo) -> some View {
-        let picked = Binding<Highlight?> {
-            model.list(listID)?.items.first { $0.id == item.id }?.highlight
-        } set: { color in
-            model.highlight(item.id, in: listID, with: color)
-        }
-        Section("Highlight") {
-            Picker("Highlight", selection: picked) {
-                ForEach(Highlight.allCases, id: \.self) { color in
-                    Label(color.name, systemImage: "circle.fill")
-                        .tint(Look.ink(color))
-                        .tag(Optional(color))
-                }
-            }
-            .pickerStyle(.palette)
-        }
-        if item.highlight != nil {
-            Button("Remove Highlight", systemImage: "circle.slash") {
-                model.highlight(item.id, in: listID, with: nil)
-            }
         }
     }
 
@@ -313,6 +315,56 @@ struct TaskRow: View {
                     .accessibilityHint("Edits the task")
             }
         }
+    }
+}
+
+/// Picks a task's highlighter color, from swiping it right: a row of the colors, with a tick on its own, and Remove
+/// Highlight
+struct HighlightPicker: View {
+    let task: ToDo
+    let pick: (Highlight?) -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 4) {
+                Text("Highlight")
+                    .font(.headline)
+                Text(task.text)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 24)
+            }
+            HStack(spacing: 12) {
+                ForEach(Highlight.allCases, id: \.self) { color in
+                    Button {
+                        pick(color)
+                    } label: {
+                        Circle()
+                            .fill(Look.ink(color))
+                            .overlay(Circle().strokeBorder(.black.opacity(0.15), lineWidth: 0.5))
+                            .overlay {
+                                if task.highlight == color {
+                                    Image(systemName: "checkmark")
+                                        .font(.body.weight(.bold))
+                                        .foregroundStyle(.black.opacity(0.75))
+                                }
+                            }
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(color.name)
+                    .accessibilityAddTraits(task.highlight == color ? .isSelected : [])
+                }
+            }
+            Button("Remove Highlight", role: .destructive) {
+                pick(nil)
+            }
+            .disabled(task.highlight == nil)
+        }
+        .padding(.top, 8)
+        .presentationDetents([.height(210)])
+        .presentationDragIndicator(.visible)
     }
 }
 
