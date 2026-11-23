@@ -107,12 +107,19 @@ final class ListUITests: XCTestCase {
     }
 
     /// Swipes a task right and opens its highlighter colors. A long swipe opens them straight away, and a short one
-    /// shows the Highlight button first.
+    /// shows the Highlight button first. The hosted simulator sometimes takes a swipe for nothing, so it tries once
+    /// more with a drag from the left of the row.
     func openColors(of text: String) {
-        row(text).swipeRight()
         let green = app.buttons["Green"]
+        let highlight = app.buttons["Highlight"]
+        row(text).swipeRight()
+        if !green.waitForExistence(timeout: 2) && !highlight.waitForExistence(timeout: 2) {
+            shoot("highlight-swipe-missed")
+            let start = row(text).coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+            let end = row(text).coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.1)
+        }
         if !green.waitForExistence(timeout: 2) {
-            let highlight = app.buttons["Highlight"]
             XCTAssertTrue(highlight.waitForExistence(timeout: 5), app.debugDescription)
             shoot("highlight-swiped")
             highlight.tap()

@@ -132,10 +132,14 @@ struct TodoListTests {
 
     // MARK: Highlights
 
+    /// Picks a menu item as a click would. In the app each click is its own event, so its own step to undo; a test
+    /// never turns the run loop, so it groups each choice itself.
     private func choose(_ title: String, for row: ToDoRow, in list: TodoList) throws {
         let menu = list.menu(for: row)
         let index = try #require(menu.items.firstIndex { $0.title == title })
+        list.undo.beginUndoGrouping()
         menu.performActionForItem(at: index)
+        list.undo.endUndoGrouping()
     }
 
     @Test func aRightClickHighlightsATask() throws {
@@ -158,8 +162,8 @@ struct TodoListTests {
         let again = list.menu(for: milk)
         #expect(again.items.filter { $0.state == .on }.map(\.title) == ["Green"])
         #expect(again.items.last?.action != nil)
-        // The same color again is no change
-        try choose("Green", for: milk, in: list)
+        // The same color again is no change, and nothing to undo
+        again.performActionForItem(at: try #require(again.items.firstIndex { $0.title == "Green" }))
         #expect(changes == 1)
 
         try choose("Pink", for: milk, in: list)
