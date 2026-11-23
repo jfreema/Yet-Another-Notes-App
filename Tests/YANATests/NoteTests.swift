@@ -97,6 +97,22 @@ struct NoteTests {
         #expect(halves?.below.id != task.id)
     }
 
+    @Test func splittingAHighlightedTaskHighlightsBothHalves() {
+        let task = ToDo(text: "Buy milk and eggs", highlight: .pink)
+        let middle = task.split(at: NSRange(location: 9, length: 0))
+        #expect(middle?.kept.highlight == .pink)
+        #expect(middle?.below.highlight == .pink)
+        // A new empty task below isn't highlighted yet
+        #expect(task.split(at: NSRange(location: 17, length: 0))?.below.highlight == nil)
+    }
+
+    @Test func savesHighlights() throws {
+        let note = Note(kind: .list, items: [ToDo(text: "Milk", highlight: .blue), ToDo(text: "Eggs")])
+        let back = try JSONDecoder().decode(Note.self, from: JSONEncoder().encode(note))
+        #expect(back == note)
+        #expect(back.items.map(\.highlight) == [.blue, nil])
+    }
+
     @Test func turnsANoteIntoAList() {
         let note = Note(kind: .text, text: "Groceries\n\n  Milk  \n- Eggs\n• Bread\n[x] Butter\n- [ ] Jam\n \t\n",
                         file: URL(fileURLWithPath: "/Users/me/groceries.txt"))

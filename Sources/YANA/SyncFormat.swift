@@ -15,7 +15,8 @@ import Foundation
 // deleted after its last change stays deleted. The list's name, once it has one, is the latest name given it.
 //
 // Anything added to a copy has to be optional, so a device on an older version still reads the newer copies (it skips
-// what it doesn't know), and a newer one reads the older copies. The list's name (1.8) was added that way.
+// what it doesn't know), and a newer one reads the older copies. The list's name (1.8) and a task's highlight (1.10)
+// were added that way, each with a time of its own, so a copy from a version without them never takes one away.
 //
 // Anything that can write to the folder can put a file in it, and a device with the wrong date writes wrong dates. So
 // a file is only taken for what its name says it is, within `SyncLimits`, and a date well ahead of this device's clock
@@ -141,8 +142,9 @@ enum SyncMerge {
     /// Merges copies of a list into one, taking each copy's device from the first, which is this device's copy and wins
     /// ties. The devices the list goes to are the latest change to them. Only those devices' copies count for the tasks,
     /// so a device that stopped syncing it can't bring back old ones. Each task is its latest change, unless it was
-    /// deleted after that. The order is the latest copy to change it, with tasks it doesn't have yet after the task they
-    /// follow in their own copy. The name is the latest one given, by a copy that says when.
+    /// deleted after that. Its highlight is the latest one given or taken off, by a copy that says when, whichever copy
+    /// its words came from. The order is the latest copy to change it, with tasks it doesn't have yet after the task
+    /// they follow in their own copy. The name is the latest one given, by a copy that says when.
     ///
     /// A date too far ahead of `now` doesn't count (`clockSlack`). In another device's copy, what's dated so has no
     /// say: it loses to anything with a date that could be right, though a task only that copy has still comes over.
@@ -183,6 +185,22 @@ enum SyncMerge {
             return (item.changed ?? .distantPast) > gone
         }
 
+        // A task's highlight goes by its own time, so a copy from before highlights, which leaves them out, never
+        // takes one off, and coloring a task on one device while its words change on another keeps both. Ties go to
+        // this device's copy.
+        var highlighted: [UUID: ToDo] = [:]
+        for copy in counted {
+            for item in copy.items where latest[item.id] != nil {
+                guard let when = item.highlightChanged else { continue }
+                if let have = highlighted[item.id], let had = have.highlightChanged, had >= when { continue }
+                highlighted[item.id] = item
+            }
+        }
+        for (id, from) in highlighted {
+            latest[id]?.highlight = from.highlight
+            latest[id]?.highlightChanged = from.highlightChanged
+        }
+
         let orderFrom = counted.max { $0.orderChanged < $1.orderChanged } ?? mine
         var order: [UUID] = []
         for item in orderFrom.items where latest[item.id] != nil && !order.contains(item.id) {
@@ -217,7 +235,10 @@ extension SyncedList {
         SyncMerge.isAhead(orderChanged, of: now) || SyncMerge.isAhead(devicesChanged, of: now)
             || nameChanged.map { SyncMerge.isAhead($0, of: now) } == true
             || deleted.values.contains { SyncMerge.isAhead($0, of: now) }
-            || items.contains { item in item.changed.map { SyncMerge.isAhead($0, of: now) } == true }
+            || items.contains { item in
+                item.changed.map { SyncMerge.isAhead($0, of: now) } == true
+                    || item.highlightChanged.map { SyncMerge.isAhead($0, of: now) } == true
+            }
     }
 
     /// This device's own copy, with anything dated too far ahead of `now` dated `now`. Its date was wrong when it
@@ -233,6 +254,7 @@ extension SyncedList {
         copy.items = items.map { item in
             var item = item
             item.changed = item.changed.map(right)
+            item.highlightChanged = item.highlightChanged.map(right)
             return item
         }
         return copy
@@ -240,7 +262,7 @@ extension SyncedList {
 
     /// Another device's copy, with anything dated too far ahead of `now` left without a date, so it has no say in a
     /// merge: its order, its devices and its name lose to any other copy's, its deletions are left out, and its tasks
-    /// lose to any other copy of them.
+    /// and their highlights lose to any other copy of them.
     func withoutFutureDates(at now: Date) -> SyncedList {
         guard isAhead(of: now) else { return self }
         let ahead = { (date: Date) in SyncMerge.isAhead(date, of: now) }
@@ -250,9 +272,9 @@ extension SyncedList {
         if let nameChanged, ahead(nameChanged) { copy.nameChanged = nil }
         copy.deleted = deleted.filter { !ahead($0.value) }
         copy.items = items.map { item in
-            guard let changed = item.changed, ahead(changed) else { return item }
             var item = item
-            item.changed = nil
+            if let changed = item.changed, ahead(changed) { item.changed = nil }
+            if let changed = item.highlightChanged, ahead(changed) { item.highlightChanged = nil }
             return item
         }
         return copy

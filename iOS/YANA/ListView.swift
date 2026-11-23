@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// A list's tasks, numbered like on the Mac. Tap a circle to check a task off, tap its text to change it, and press
-/// Return in a task to start a new one below it. Touch and hold a task to drag it into a new order (or use Edit), and
-/// swipe one to delete it, with Undo for a few seconds after. Rename… in the … menu names the list. A list that has
-/// stopped syncing says so at the top.
+/// Return in a task to start a new one below it. Touch and hold a task to give its line a highlighter color, or move
+/// your finger to drag it into a new order (or use Edit), and swipe one to delete it, with Undo for a few seconds
+/// after. Rename… in the … menu names the list. A list that has stopped syncing says so at the top.
 struct ListView: View {
     let listID: UUID
     @Environment(AppModel.self) private var model
@@ -78,7 +78,10 @@ struct ListView: View {
                 } edit: {
                     go(to: .task(item.id))
                 }
-                .listRowBackground(look.background)
+                .listRowBackground(look.rowBackground(item.highlight))
+                .contextMenu {
+                    highlightMenu(for: item)
+                }
             }
             .onDelete { model.deleteTasks(at: $0, in: listID) }
             .onMove { model.moveTasks(from: $0, to: $1, in: listID) }
@@ -204,6 +207,32 @@ struct ListView: View {
         }
     }
 
+    /// What touching and holding a task shows: a row of highlighter colors, with the task's own picked, and Remove
+    /// Highlight once it has one
+    @ViewBuilder
+    private func highlightMenu(for item: ToDo) -> some View {
+        let picked = Binding<Highlight?> {
+            model.list(listID)?.items.first { $0.id == item.id }?.highlight
+        } set: { color in
+            model.highlight(item.id, in: listID, with: color)
+        }
+        Section("Highlight") {
+            Picker("Highlight", selection: picked) {
+                ForEach(Highlight.allCases, id: \.self) { color in
+                    Label(color.name, systemImage: "circle.fill")
+                        .tint(Look.ink(color))
+                        .tag(Optional(color))
+                }
+            }
+            .pickerStyle(.palette)
+        }
+        if item.highlight != nil {
+            Button("Remove Highlight", systemImage: "circle.slash") {
+                model.highlight(item.id, in: listID, with: nil)
+            }
+        }
+    }
+
     /// A task's text, as typed. Return comes in as a new line, which `Note.enter` turns into a new task.
     private func text(of task: UUID) -> Binding<String> {
         Binding {
@@ -280,6 +309,7 @@ struct TaskRow: View {
                     .contentShape(Rectangle())
                     .onTapGesture(perform: edit)
                     .accessibilityAddTraits(.isButton)
+                    .accessibilityValue(item.highlight.map { "\($0.name) highlight" } ?? "")
                     .accessibilityHint("Edits the task")
             }
         }

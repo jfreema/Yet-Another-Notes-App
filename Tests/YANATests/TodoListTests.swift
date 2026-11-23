@@ -130,6 +130,111 @@ struct TodoListTests {
         #expect(row("Eggs", in: list)?.field.stringValue == "Eggs")
     }
 
+    // MARK: Highlights
+
+    private func choose(_ title: String, for row: ToDoRow, in list: TodoList) throws {
+        let menu = list.menu(for: row)
+        let index = try #require(menu.items.firstIndex { $0.title == title })
+        menu.performActionForItem(at: index)
+    }
+
+    @Test func aRightClickHighlightsATask() throws {
+        let list = TodoList(items: [ToDo(text: "Milk"), ToDo(text: "Eggs")])
+        _ = show(list)
+        let milk = try #require(row("Milk", in: list))
+        var changes = 0
+        list.onChange = { changes += 1 }
+
+        let menu = list.menu(for: milk)
+        #expect(menu.items.map(\.title) == ["Highlight", "Yellow", "Green", "Blue", "Purple", "Pink", "Orange",
+                                            "Remove Highlight"])
+        #expect(menu.items.allSatisfy { $0.state == .off })
+        #expect(menu.items.last?.action == nil)
+
+        try choose("Green", for: milk, in: list)
+        #expect(list.note.items.map(\.highlight) == [.green, nil])
+        #expect(changes == 1)
+        // The menu ticks the task's color, and can take it off
+        let again = list.menu(for: milk)
+        #expect(again.items.filter { $0.state == .on }.map(\.title) == ["Green"])
+        #expect(again.items.last?.action != nil)
+        // The same color again is no change
+        try choose("Green", for: milk, in: list)
+        #expect(changes == 1)
+
+        try choose("Pink", for: milk, in: list)
+        #expect(list.note.items.map(\.highlight) == [.pink, nil])
+        list.undo.undo()
+        #expect(list.note.items.map(\.highlight) == [.green, nil])
+        list.undo.undo()
+        #expect(list.note.items.map(\.highlight) == [nil, nil])
+        list.undo.redo()
+        #expect(list.note.items.map(\.highlight) == [.green, nil])
+
+        try choose("Remove Highlight", for: milk, in: list)
+        #expect(list.note.items.map(\.highlight) == [nil, nil])
+        #expect(list.undo.undoActionName == "Remove Highlight")
+    }
+
+    @Test func aTaskBeingEditedShowsTheColorsAboveCutCopyAndPaste() throws {
+        let list = TodoList(items: [ToDo(text: "Milk", highlight: .blue)])
+        let window = show(list)
+        let milk = try #require(row("Milk", in: list))
+        #expect(window.makeFirstResponder(milk.field))
+        let editor = try #require(milk.field.currentEditor() as? NSTextView)
+        let editing = NSMenu()
+        editing.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "")
+        let event = try #require(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
+                                                    timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                                    eventNumber: 0, clickCount: 1, pressure: 1))
+        let menu = try #require(milk.field.textView(editor, menu: editing, for: event, at: 0))
+        #expect(menu.items.map(\.title) == ["Highlight", "Yellow", "Green", "Blue", "Purple", "Pink", "Orange",
+                                            "Remove Highlight", "", "Cut"])
+        #expect(menu.items.filter { $0.state == .on }.map(\.title) == ["Blue"])
+    }
+
+    @Test func aHighlightFromAnotherDeviceLeavesTheTaskBeingEditedAlone() throws {
+        let milk = ToDo(text: "Milk"), eggs = ToDo(text: "Eggs")
+        let list = TodoList(items: [milk, eggs])
+        let window = show(list)
+        let row = try #require(row("Milk", in: list))
+        #expect(window.makeFirstResponder(row.field))
+        let editor = try #require(row.field.currentEditor() as? NSTextView)
+        editor.setSelectedRange(NSRange(location: 2, length: 0))
+
+        var yellow = milk
+        yellow.highlight = .yellow
+        yellow.highlightChanged = Date()
+        list.show([yellow, eggs])
+        // Still being edited, with the cursor where it was, and now yellow
+        #expect(row.field.currentEditor() === editor)
+        #expect(editor.selectedRange() == NSRange(location: 2, length: 0))
+        #expect(list.note.items.map(\.highlight) == [.yellow, nil])
+    }
+
+    @Test func aHighlightDrawsItsLine() throws {
+        let list = TodoList(items: [ToDo(text: "Milk", highlight: .orange), ToDo(text: "Eggs")])
+        _ = show(list)
+        let milk = try #require(row("Milk", in: list))
+        // The whole line, number and all
+        #expect(milk.highlightFrame.minX < milk.checkbox.frame.minX)
+        #expect(milk.highlightFrame.maxX == milk.bounds.maxX)
+        #expect(milk.highlightFrame.height > milk.field.frame.height - 2)
+
+        // Each color is see-through in light and dark mode, and solid on a sticky note
+        let plain = Look(textSize: 14, sticky: false), sticky = Look(textSize: 14, sticky: true)
+        for color in Highlight.allCases {
+            for name in [NSAppearance.Name.aqua, .darkAqua] {
+                var alpha: CGFloat = 0
+                NSAppearance(named: name)?.performAsCurrentDrawingAppearance {
+                    alpha = plain.color(of: color).usingColorSpace(.sRGB)?.alphaComponent ?? 0
+                }
+                #expect(alpha > 0.2 && alpha < 0.6)
+            }
+            #expect(sticky.color(of: color).usingColorSpace(.sRGB)?.alphaComponent == 1)
+        }
+    }
+
     @Test func aTaskThatNeverHadAnythingInItJustGoes() throws {
         let list = TodoList(items: [ToDo(text: "Milk"), ToDo(text: "")])
         _ = show(list)

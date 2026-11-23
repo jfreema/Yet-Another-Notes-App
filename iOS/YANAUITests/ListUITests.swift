@@ -1,7 +1,7 @@
 import XCTest
 
-/// Drags tasks into a new order, types in them, and undoes deleting them, on the sample lists debug builds show with
-/// -YANAScreenshots.
+/// Drags tasks into a new order, types in them, highlights them, and undoes deleting them, on the sample lists debug
+/// builds show with -YANAScreenshots.
 /// Groceries is Milk, Eggs, Coffee beans, Lemons, Sourdough.
 final class ListUITests: XCTestCase {
     var app: XCUIApplication!
@@ -89,6 +89,50 @@ final class ListUITests: XCTestCase {
         sleep(1)
         XCTAssertEqual(order(all), all)
         XCTAssertFalse(undo.exists)
+    }
+
+    /// Something in the menu touching and holding a task shows, by what it says
+    func menuItem(_ label: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
+    /// Waits for what an element's value says to match, as VoiceOver would read it
+    func waitFor(_ element: XCUIElement, value format: String, _ value: String) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: format, value), object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
+    }
+
+    /// Keeps a screenshot in the test results, when the run asks for them with TEST_RUNNER_YANA_SHOTS=1
+    func shoot(_ name: String) {
+        guard ProcessInfo.processInfo.environment["YANA_SHOTS"] != nil else { return }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    func testTouchAndHoldHighlightsATask() {
+        task("Coffee beans").press(forDuration: 1.2)
+        let green = menuItem("Green")
+        XCTAssertTrue(green.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertFalse(menuItem("Remove Highlight").exists)
+        shoot("highlight-menu")
+        green.tap()
+        XCTAssertTrue(waitFor(task("Coffee beans"), value: "value == %@", "Green highlight"), app.debugDescription)
+        sleep(1)
+        shoot("highlighted")
+
+        // And taken off again
+        task("Coffee beans").press(forDuration: 1.2)
+        let remove = menuItem("Remove Highlight")
+        XCTAssertTrue(remove.waitForExistence(timeout: 5), app.debugDescription)
+        shoot("highlight-menu-again")
+        remove.tap()
+        XCTAssertTrue(waitFor(task("Coffee beans"), value: "NOT (value == %@)", "Green highlight"),
+                      app.debugDescription)
+        // Nothing moved
+        sleep(1)
+        XCTAssertEqual(order(groceries), groceries)
     }
 
     func testTappingATaskTypesInIt() {

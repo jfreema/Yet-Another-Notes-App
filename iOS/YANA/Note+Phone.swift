@@ -84,8 +84,9 @@ extension Note {
             let line = line.trimmingCharacters(in: .whitespaces)
             let isLast = number == rest.count - 1
             if line.isEmpty && !isLast { continue }
-            // A checked task split in two stays checked, but a new empty task isn't done yet
-            let item = ToDo(text: line, done: was.done && !line.isEmpty)
+            // A checked or highlighted task split in two stays that way, but a new empty task isn't done or highlighted
+            // yet
+            let item = ToDo(text: line, done: was.done && !line.isEmpty, highlight: line.isEmpty ? nil : was.highlight)
             items.insert(item, at: at)
             at += 1
             next = item
@@ -100,5 +101,11 @@ extension Note {
 
     mutating func clearChecked() {
         items.removeAll(where: \.done)
+    }
+
+    /// Shades a task's line with a highlighter color, or with nil, takes its highlight off
+    mutating func highlight(_ task: UUID, with color: Highlight?) {
+        guard let index = items.firstIndex(where: { $0.id == task }) else { return }
+        items[index].highlight = color
     }
 }
