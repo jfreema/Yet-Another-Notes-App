@@ -132,8 +132,9 @@ struct TodoListTests {
 
     // MARK: Highlights
 
-    /// Picks a menu item as a click would. In the app each click is its own event, so its own step to undo; a test
-    /// never turns the run loop, so it groups each choice itself.
+    /// Picks a menu item as a click would. In the app each click is its own event, so its own step to undo. A test
+    /// never turns the run loop, which is what ends an event's undo group, so the test makes the groups itself (with
+    /// `groupsByEvent` off, or they'd sit inside the event's one group).
     private func choose(_ title: String, for row: ToDoRow, in list: TodoList) throws {
         let menu = list.menu(for: row)
         let index = try #require(menu.items.firstIndex { $0.title == title })
@@ -148,6 +149,7 @@ struct TodoListTests {
         let milk = try #require(row("Milk", in: list))
         var changes = 0
         list.onChange = { changes += 1 }
+        list.undo.groupsByEvent = false
 
         let menu = list.menu(for: milk)
         #expect(menu.items.map(\.title) == ["Highlight", "Yellow", "Green", "Blue", "Purple", "Pink", "Orange",
