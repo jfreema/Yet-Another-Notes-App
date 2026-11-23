@@ -49,7 +49,20 @@ def version(number):
     return found[0] if found else None
 
 
+def store():
+    """Whether the app is on the US App Store, as anyone sees it"""
+    print("== On the App Store")
+    got = requests.get(f"https://itunes.apple.com/lookup?id={APP}&country=us", timeout=30).json()
+    for r in got.get("results", []):
+        print("  lookup:", r.get("trackName"), "version", r.get("version"), "released", r.get("currentVersionReleaseDate"),
+              "url", r.get("trackViewUrl"))
+    print("  lookup results:", got.get("resultCount"))
+    page = requests.get(f"https://apps.apple.com/us/app/id{APP}", timeout=30, allow_redirects=True)
+    print("  page:", page.status_code, page.url)
+
+
 def show():
+    store()
     print("== Versions")
     for v, b in versions():
         a = v["attributes"]
