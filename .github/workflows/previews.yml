@@ -1,0 +1,131 @@
+name: Previews (temporary)
+
+# TEMPORARY, never for main: draws highlighted tasks on the Mac and the iPhone simulator and commits the pictures to
+# this branch under previews/.
+
+on:
+  push:
+    branches: [claude/project-thread-ka82h6]
+    paths: [previews/request.txt]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Draw the Mac previews
+        timeout-minutes: 20
+        run: |
+          mkdir -p "$RUNNER_TEMP/shots"
+          YANA_SCREENSHOTS="$RUNNER_TEMP/shots" swift test --filter ScreenshotTests 2>&1 | tail -40
+          ls -la "$RUNNER_TEMP/shots"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: ${{ runner.temp }}/shots
+
+  iphone:
+    runs-on: macos-26
+    timeout-minutes: 50
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Make the Xcode project
+        run: |
+          brew install xcodegen
+          command -v xcbeautify >/dev/null || brew install xcbeautify
+          cd iOS && xcodegen generate
+      - name: Draw the iPhone previews
+        timeout-minutes: 40
+        run: |
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          best = None
+          for runtime, devices in json.load(sys.stdin)["devices"].items():
+              if ".iOS-" not in runtime:
+                  continue
+              version = tuple(int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-"))
+              for device in devices:
+                  if device["name"].startswith("iPhone") and "Pro" in device["name"] and "Max" not in device["name"] and (best is None or version > best[0]):
+                      best = (version, device["udid"], device["name"])
+          print(best[1])
+          print(best[2], "on iOS", ".".join(map(str, best[0])), file=sys.stderr)
+          ')"
+          out="$RUNNER_TEMP/shots"
+          mkdir -p "$out"
+          xcodebuild build -project iOS/YANA.xcodeproj -scheme YANA -configuration Debug -destination "id=$udid" \
+            -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGNING_ALLOWED=NO 2>&1 | xcbeautify --renderer github-actions
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 \
+            --wifiBars 3 --cellularBars 4 || true
+          app="$(find "$RUNNER_TEMP/dd/Build/Products" -name YANA.app -maxdepth 2 | head -1)"
+          xcrun simctl install "$udid" "$app"
+          shoot() { # name, appearance, args...
+            local name="$1" look="$2"; shift 2
+            xcrun simctl ui "$udid" appearance "$look"
+            xcrun simctl terminate "$udid" io.github.jfreema.yana.ios 2>/dev/null || true
+            xcrun simctl launch "$udid" io.github.jfreema.yana.ios -YANAScreenshots YES "$@"
+            sleep 6
+            xcrun simctl io "$udid" screenshot "$out/$name.png"
+          }
+          shoot iphone-light light -YANAOpen 0 -sticky NO
+          shoot iphone-dark dark -YANAOpen 0 -sticky NO
+          shoot iphone-sticky light -YANAOpen 0 -sticky YES
+          shoot iphone-lists light -sticky NO
+          xcrun simctl terminate "$udid" io.github.jfreema.yana.ios 2>/dev/null || true
+          xcrun simctl ui "$udid" appearance light
+          TEST_RUNNER_YANA_SHOTS=1 xcodebuild test -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
+            -derivedDataPath "$RUNNER_TEMP/dd" -resultBundlePath "$RUNNER_TEMP/ui.xcresult" \
+            -only-testing:YANAUITests/ListUITests/testTouchAndHoldHighlightsATask \
+            -only-testing:YANAUITests/ListUITests/testTouchAndHoldDragsATask 2>&1 \
+            | tee "$RUNNER_TEMP/ui.log" | xcbeautify --renderer github-actions || echo "::warning::UI tests failed"
+          mkdir -p "$RUNNER_TEMP/attachments"
+          xcrun xcresulttool export attachments --path "$RUNNER_TEMP/ui.xcresult" \
+            --output-path "$RUNNER_TEMP/attachments" || true
+          ls -la "$RUNNER_TEMP/attachments" || true
+          cat "$RUNNER_TEMP/attachments/manifest.json" || true
+          python3 - "$RUNNER_TEMP/attachments" "$out" <<'PY' || true
+          import json, os, shutil, sys
+          src, dst = sys.argv[1], sys.argv[2]
+          for test in json.load(open(os.path.join(src, "manifest.json"))):
+              for a in test.get("attachments", []):
+                  name = a.get("suggestedHumanReadableName") or a["exportedFileName"]
+                  shutil.copy(os.path.join(src, a["exportedFileName"]), os.path.join(dst, "ui-" + name.replace(" ", "_")))
+          PY
+          grep -E "Test Case .* (passed|failed)" "$RUNNER_TEMP/ui.log" || true
+          ls -la "$out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone
+          path: ${{ runner.temp }}/shots
+
+  commit:
+    needs: [mac, iphone]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: previews/out
+      - name: Commit the pictures to this branch
+        run: |
+          ls -R previews/out | head -50
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add previews/out
+          git commit -m "TEMPORARY: previews of highlighted tasks" || exit 0
+          for i in 1 2 3; do git pull --rebase origin "${GITHUB_REF_NAME}" && git push origin "HEAD:${GITHUB_REF_NAME}" && break; sleep 5; done
