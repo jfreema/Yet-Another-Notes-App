@@ -1,0 +1,28 @@
+name: App Store release (temporary)
+
+# TEMPORARY, on this branch only, never for main: does what .github/scripts/asc_mode.txt says (see asc_release.py).
+
+on:
+  push:
+    branches: [claude/project-thread-ka82h6]
+    paths: [.github/scripts/**, .github/workflows/asc-release.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: asc-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install -q pyjwt cryptography requests
+      - run: python3 .github/scripts/asc_release.py
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.ASC_KEY }}
