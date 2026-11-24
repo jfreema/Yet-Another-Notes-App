@@ -1,0 +1,80 @@
+name: App Store screenshots (temporary)
+
+# TEMPORARY, on the thread's branch only, never for main: takes the App Store's 6.9-inch iPhone screenshots of the
+# sample lists on the simulator and commits them back to the branch under screens-store/.
+
+on:
+  push:
+    branches: [claude/project-thread-ka82h6]
+    paths: [.github/workflows/store-screens.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  screens:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build for the simulator
+        timeout-minutes: 20
+        run: |
+          brew install xcodegen
+          (cd iOS && xcodegen generate)
+          udid="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          best = None
+          for runtime, devices in json.load(sys.stdin)["devices"].items():
+              if ".iOS-" not in runtime:
+                  continue
+              version = tuple(int(part) for part in runtime.rsplit(".iOS-", 1)[1].split("-"))
+              for device in devices:
+                  if device["name"] in ("iPhone 17 Pro Max", "iPhone 16 Pro Max") and (best is None or version > best[0]):
+                      best = (version, device["udid"], device["name"])
+          print(best[1])
+          print(best[2], "on iOS", ".".join(map(str, best[0])), file=sys.stderr)
+          ')"
+          echo "UDID=$udid" >> "$GITHUB_ENV"
+          xcodebuild build -project iOS/YANA.xcodeproj -scheme YANA -destination "id=$udid" \
+            -derivedDataPath build -quiet CODE_SIGNING_ALLOWED=NO
+      - name: Take the screenshots
+        timeout-minutes: 10
+        run: |
+          set -x
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 \
+            --cellularBars 4 --wifiBars 3 || true
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/YANA.app
+          mkdir -p screens
+          shot() { # name, appearance, launch arguments...
+            local name="$1" look="$2"; shift 2
+            xcrun simctl ui "$UDID" appearance "$look"
+            xcrun simctl terminate "$UDID" io.github.jfreema.yana.ios 2>/dev/null || true
+            xcrun simctl launch "$UDID" io.github.jfreema.yana.ios -YANAScreenshots YES "$@"
+            sleep 10
+            xcrun simctl io "$UDID" screenshot "screens/$name.png"
+          }
+          shot 1-highlights light -sticky NO -YANAOpen 0
+          shot 2-colors light -sticky NO -YANAOpen 0 -YANAShow highlight
+          shot 3-sticky light -sticky YES -YANAOpen 1
+          shot 4-lists light -sticky NO
+          shot 5-sync light -sticky NO -YANAOpen 1 -YANAShow sync
+          shot 6-dark dark -sticky NO -YANAOpen 2
+          sips -g pixelWidth -g pixelHeight screens/*.png
+      - name: Commit them to the branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf screens-store && mv screens screens-store && git add screens-store
+          git commit -m "TEMPORARY: App Store screenshots"
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin HEAD:"$GITHUB_REF_NAME"

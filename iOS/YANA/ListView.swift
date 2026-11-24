@@ -197,6 +197,10 @@ struct ListView: View {
             if ListsView.showAtLaunch == "undo", model.undo(for: listID) == nil {
                 model.deleteTasks(at: [1], in: listID)
             }
+            if ListsView.showAtLaunch == "highlight",
+               let item = list.items.first(where: { $0.highlight != nil && !$0.done }) {
+                highlighting = Picking(id: item.id)
+            }
         }
     }
 

@@ -4,8 +4,9 @@ import SwiftUI
 // Sample lists to take screenshots with, in debug builds only. Launch with `-YANAScreenshots YES`, plus `-YANAOpen 0`
 // to open the first list, `-YANAShow sync` or `-YANAShow settings` for a sheet, and `-sticky YES` for the sticky note
 // look. `-YANAShow deleted`, `folder` and `offer` show Recently Deleted, a folder's lists to bring here, and a new
-// device to send lists to; `-YANAShow undo` deletes a task in the open list so Undo shows; and `-YANAStopped YES`
-// shows the synced lists as stopped.
+// device to send lists to; `-YANAShow undo` deletes a task in the open list so Undo shows; `-YANAShow highlight`
+// shows the highlighter colors for the open list's first highlighted task; and `-YANAStopped YES` shows the synced
+// lists as stopped.
 
 extension AppModel {
     static func launched() -> AppModel {
@@ -25,8 +26,8 @@ extension ListsView {
         UserDefaults.standard.object(forKey: "YANAOpen") == nil ? nil : UserDefaults.standard.integer(forKey: "YANAOpen")
     }
 
-    /// What to show at launch: "settings", "deleted", "folder" or "offer" over the lists, or "sync" or "undo" in the
-    /// open list
+    /// What to show at launch: "settings", "deleted", "folder" or "offer" over the lists, or "sync", "undo" or
+    /// "highlight" in the open list
     static var showAtLaunch: String? { UserDefaults.standard.string(forKey: "YANAShow") }
 }
 #else
