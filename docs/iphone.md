@@ -1,8 +1,8 @@
 # YANA for iPhone
 
 YANA for iPhone shows and edits the to-do lists YANA syncs, through the same sync folder your Macs use. Check tasks
-off, change them, add them (Return in a task starts a new one below, as on the Mac), touch and hold one to drag it into order, and clear
-the checked ones. Add the sync folder and YANA shows the lists in it to bring over. A list started on the iPhone can
+off, change them, add them (Return in a task starts a new one below, as on the Mac), touch and hold one to drag it into
+order, swipe one right to highlight it, and clear the checked ones. Add the sync folder and YANA shows the lists in it to bring over. A list started on the iPhone can
 be sent to your Macs with **Sync This List…**. Notes stay on the Mac: only lists come to the iPhone.
 
 It syncs while it's open: when something changes in the sync folder, after each change you make, and as you leave it.
@@ -92,6 +92,11 @@ synced list away in the lists removes it from the iPhone only, like deleting its
 
 If YANA can't open a list's sync folder, the list says **Not syncing** in your lists, and says when it last synced at
 the top of the list. Removing the folder in Settings and adding it again usually fixes it.
+
+## Highlights
+
+Swipe a task right and tap **Highlight**, then pick a color to shade its line, like a highlighter: yellow, green,
+blue, purple, pink or orange. **Remove Highlight** takes it off. Highlights sync with your Macs (on YANA 1.10 or later), and a device on an older version leaves them be.
 
 ## Undo, and Recently Deleted
 

@@ -1,7 +1,7 @@
 import XCTest
 
-/// Drags tasks into a new order, types in them, and undoes deleting them, on the sample lists debug builds show with
-/// -YANAScreenshots.
+/// Drags tasks into a new order, types in them, highlights them, and undoes deleting them, on the sample lists debug
+/// builds show with -YANAScreenshots.
 /// Groceries is Milk, Eggs, Coffee beans, Lemons, Sourdough.
 final class ListUITests: XCTestCase {
     var app: XCUIApplication!
@@ -89,6 +89,66 @@ final class ListUITests: XCTestCase {
         sleep(1)
         XCTAssertEqual(order(all), all)
         XCTAssertFalse(undo.exists)
+    }
+
+    /// Waits for what an element's value says to match, as VoiceOver would read it
+    func waitFor(_ element: XCUIElement, value format: String, _ value: String) -> Bool {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: format, value), object: element)
+        return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
+    }
+
+    /// Keeps a screenshot in the test results, when the run asks for them with TEST_RUNNER_YANA_SHOTS=1
+    func shoot(_ name: String) {
+        guard ProcessInfo.processInfo.environment["YANA_SHOTS"] != nil else { return }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    /// Swipes a task right and opens its highlighter colors. A long swipe opens them straight away, and a short one
+    /// shows the Highlight button first. The hosted simulator sometimes takes a swipe for nothing, so it tries once
+    /// more with a drag from the left of the row.
+    func openColors(of text: String) {
+        let green = app.buttons["Green"]
+        let highlight = app.buttons["Highlight"]
+        row(text).swipeRight()
+        if !green.waitForExistence(timeout: 2) && !highlight.waitForExistence(timeout: 2) {
+            shoot("highlight-swipe-missed")
+            let start = row(text).coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+            let end = row(text).coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.1)
+        }
+        if !green.waitForExistence(timeout: 2) {
+            XCTAssertTrue(highlight.waitForExistence(timeout: 5), app.debugDescription)
+            shoot("highlight-swiped")
+            highlight.tap()
+        }
+        XCTAssertTrue(green.waitForExistence(timeout: 5), app.debugDescription)
+        sleep(1)
+    }
+
+    func testSwipingRightHighlightsATask() {
+        openColors(of: "Coffee beans")
+        XCTAssertFalse(app.buttons["Remove Highlight"].isEnabled)
+        shoot("highlight-picker")
+        app.buttons["Green"].tap()
+        XCTAssertTrue(waitFor(task("Coffee beans"), value: "value == %@", "Green highlight"), app.debugDescription)
+        XCTAssertFalse(app.buttons["Green"].exists)
+        sleep(1)
+        shoot("highlighted")
+
+        // And taken off again
+        openColors(of: "Coffee beans")
+        let remove = app.buttons["Remove Highlight"]
+        XCTAssertTrue(remove.isEnabled, app.debugDescription)
+        shoot("highlight-picker-again")
+        remove.tap()
+        XCTAssertTrue(waitFor(task("Coffee beans"), value: "NOT (value == %@)", "Green highlight"),
+                      app.debugDescription)
+        // Nothing moved
+        sleep(1)
+        XCTAssertEqual(order(groceries), groceries)
     }
 
     func testTappingATaskTypesInIt() {

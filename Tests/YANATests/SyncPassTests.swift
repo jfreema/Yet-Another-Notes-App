@@ -100,6 +100,22 @@ struct SyncPassTests {
         #expect(changes.writes.first?.copy.items.map(\.text) == ["Milk", "Brown eggs", "Jam"])
     }
 
+    @Test func showsAHighlightFromTheOtherDevice() throws {
+        var pass = SyncPass(device: me)
+        let milk = task("Milk"), eggs = task("Eggs")
+        let local = list([milk, eggs])
+        var yellow = eggs
+        yellow.highlight = .yellow
+        yellow.highlightChanged = at(60)
+        let changes = run(&pass, [local], found: [local.id: [copy(air, [milk, yellow])]])
+        let merged = try #require(changes.merged.first)
+        // Only its color changed, which still has to be shown
+        #expect(merged.looksDifferent)
+        #expect(merged.note.items.map(\.highlight) == [nil, .yellow])
+        #expect(merged.note.items.map(\.text) == ["Milk", "Eggs"])
+        #expect(changes.writes.first?.copy.items.map(\.highlight) == [nil, .yellow])
+    }
+
     @Test func aChangeThatDoesntShowIsStillTakenIn() throws {
         var pass = SyncPass(device: me)
         let milk = task("Milk")

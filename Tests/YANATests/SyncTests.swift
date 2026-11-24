@@ -245,6 +245,121 @@ struct SyncTests {
         #expect(note.adopting(list).title == "Milk")
     }
 
+    // MARK: Highlights
+
+    private func colored(_ item: ToDo, _ color: Highlight?, at seconds: TimeInterval?) -> ToDo {
+        var item = item
+        item.highlight = color
+        item.highlightChanged = seconds.map { at($0) }
+        return item
+    }
+
+    @Test func stampsAHighlight() {
+        let milk = task("Milk"), eggs = task("Eggs")
+        let before = synced([milk, eggs])
+        var now = before
+        now.items[0].highlight = .yellow
+        let stamped = now.stamped(since: before, at: at(10))
+        #expect(stamped.items[0].highlightChanged == at(10))
+        // Coloring a task isn't a change to its words or the order
+        #expect(stamped.items.map(\.changed) == [at(0), at(0)])
+        #expect(stamped.items[1].highlightChanged == nil)
+        #expect(stamped.sync?.orderChanged == at(0))
+        // Nor is it undone by a page that keeps no times
+        var page = stamped
+        page.items = page.items.map { ToDo(id: $0.id, text: $0.text, done: $0.done, highlight: $0.highlight) }
+        #expect(page.stamped(since: stamped, at: at(20)) == stamped)
+        // Taking it off is a change too, and keeps when
+        var off = stamped
+        off.items[0].highlight = nil
+        let unstamped = off.stamped(since: stamped, at: at(30))
+        #expect(unstamped.items[0].highlight == nil)
+        #expect(unstamped.items[0].highlightChanged == at(30))
+        // A new task that's highlighted, like the second half of one split in two, is dated now
+        var split = stamped
+        split.items.append(ToDo(text: "Bread", highlight: .green))
+        #expect(split.stamped(since: stamped, at: at(40)).items[2].highlightChanged == at(40))
+    }
+
+    @Test func takesTheLatestHighlight() {
+        let milk = task("Milk")
+        let merged = SyncMerge.merge([copy("mac", [colored(milk, .yellow, at: 5)]),
+                                      copy("air", [colored(milk, .blue, at: 7)])], now: at(10))
+        #expect(merged.items.map(\.highlight) == [.blue])
+        #expect(merged.items.map(\.highlightChanged) == [at(7)])
+        // Taken off later, it's off
+        let off = SyncMerge.merge([copy("mac", [colored(milk, .yellow, at: 5)]),
+                                   copy("air", [colored(milk, nil, at: 9)])], now: at(10))
+        #expect(off.items.map(\.highlight) == [nil])
+        // A tie goes to this device
+        #expect(SyncMerge.merge([copy("mac", [colored(milk, .pink, at: 5)]),
+                                 copy("air", [colored(milk, .blue, at: 5)])], now: at(10)).items[0].highlight == .pink)
+    }
+
+    @Test func keepsAHighlightAndAnEditFromDifferentDevices() {
+        let milk = task("Milk")
+        // Colored on this Mac, and its words changed later on the other
+        var edited = milk
+        edited.text = "Oat milk"
+        edited.changed = at(8)
+        let merged = SyncMerge.merge([copy("mac", [colored(milk, .green, at: 6)]), copy("air", [edited])], now: at(10))
+        #expect(merged.items.map(\.text) == ["Oat milk"])
+        #expect(merged.items.map(\.highlight) == [.green])
+        #expect(merged.items.map(\.highlightChanged) == [at(6)])
+        // And the other way round
+        let back = SyncMerge.merge([copy("air", [edited]), copy("mac", [colored(milk, .green, at: 6)])], now: at(10))
+        #expect(back.items.map(\.text) == ["Oat milk"])
+        #expect(back.items.map(\.highlight) == [.green])
+    }
+
+    @Test func aCopyFromBeforeHighlightsDoesntTakeOneOff() {
+        // A version before highlights writes its copy without them, even after changing the task's words
+        let milk = task("Milk")
+        var old = milk
+        old.text = "Milk, 2 pints"
+        old.changed = at(9)
+        let merged = SyncMerge.merge([copy("mac", [colored(milk, .orange, at: 5)]), copy("air", [old])], now: at(10))
+        #expect(merged.items.map(\.text) == ["Milk, 2 pints"])
+        #expect(merged.items.map(\.highlight) == [.orange])
+        // Nor from a device that has highlights but never dated this one
+        let air = SyncMerge.merge([copy("air", [old]), copy("mac", [colored(milk, .orange, at: 5)])], now: at(10))
+        #expect(air.items.map(\.highlight) == [.orange])
+    }
+
+    @Test func aHighlightDatedFarAheadHasNoSay() {
+        let milk = task("Milk")
+        let ahead = SyncMerge.clockSlack + 100
+        // Another device's: it loses to one that could be right
+        let theirs = SyncMerge.merge([copy("mac", [colored(milk, .yellow, at: 5)]),
+                                      copy("air", [colored(milk, .blue, at: ahead)])], now: at(10))
+        #expect(theirs.items.map(\.highlight) == [.yellow])
+        // This device's own is dated now
+        let mine = SyncMerge.merge([copy("mac", [colored(milk, .blue, at: ahead)]),
+                                    copy("air", [colored(milk, .yellow, at: 5)])], now: at(10))
+        #expect(mine.items.map(\.highlight) == [.blue])
+        #expect(mine.items.map(\.highlightChanged) == [at(10)])
+    }
+
+    @Test func aDeletedTaskStaysDeletedThoughItWasHighlighted() {
+        let milk = task("Milk")
+        let merged = SyncMerge.merge([copy("mac", [colored(milk, .pink, at: 5)]),
+                                      copy("air", [], deleted: [milk.id: 7])], now: at(10))
+        #expect(merged.items.isEmpty)
+    }
+
+    @Test func aListStartingToSyncDatesItsHighlights() {
+        let note = Note(kind: .list, items: [ToDo(text: "Milk", highlight: .purple), ToDo(text: "Eggs")])
+        let syncing = note.startingToSync(in: "f", from: "mac", to: ["air"], at: at(10))
+        #expect(syncing.items.map(\.highlight) == [.purple, nil])
+        #expect(syncing.items.map(\.highlightChanged) == [at(10), nil])
+    }
+
+    @Test func showsAHighlightFromAnotherDevice() {
+        let milk = task("Milk")
+        #expect(!milk.looksLike(colored(milk, .yellow, at: 5)))
+        #expect(milk.readsLike(colored(milk, .yellow, at: 5)))
+    }
+
     @Test func forgetsOldDeletions() {
         let gone = UUID()
         let mine = copy("mac", [], deleted: [gone: 0])
@@ -334,6 +449,9 @@ struct SyncTests {
         list.name = "Groceries"
         list.nameChanged = at(3.5)
         #expect(try JSONDecoder().decode(SyncedList.self, from: list.encoded()) == list)
+        list.items[1].highlight = .green
+        list.items[1].highlightChanged = at(4.25)
+        #expect(try JSONDecoder().decode(SyncedList.self, from: list.encoded()) == list)
     }
 
     /// A copy as YANA 1.7 reads and writes it, before lists had names
@@ -367,6 +485,54 @@ struct SyncTests {
         #expect(back.name == nil)
         #expect(back.nameChanged == nil)
         #expect(back.items == list.items)
+    }
+
+    /// A task as versions before highlights read and write it
+    private struct TaskBeforeHighlights: Codable, Equatable {
+        var id: UUID
+        var text: String
+        var done: Bool
+        var changed: Date?
+    }
+
+    private struct CopyBeforeHighlights: Codable {
+        var format: Int
+        var device: String
+        var items: [TaskBeforeHighlights]
+        var orderChanged: Date
+        var devices: [String]
+        var devicesChanged: Date
+        var deleted: [String: Date]
+        var name: String?
+        var nameChanged: Date?
+    }
+
+    @Test func highlightsStayReadableByOlderVersions() throws {
+        // A task without a highlight is written as before
+        let plain = copy("mac", [task("Milk")])
+        let text = try #require(String(data: plain.encoded(), encoding: .utf8))
+        #expect(!text.contains("highlight"))
+        // A highlighted one still reads in 1.9, which skips the highlight
+        var list = copy("mac", [task("Milk", done: true, at: 1), task("Eggs", at: 2)])
+        list.items[0].highlight = .yellow
+        list.items[0].highlightChanged = at(3)
+        list.name = "Groceries"
+        list.nameChanged = at(4)
+        let old = try JSONDecoder().decode(CopyBeforeHighlights.self, from: list.encoded())
+        #expect(old.items.map(\.text) == ["Milk", "Eggs"])
+        #expect(old.items.map(\.changed) == [at(1), at(2)])
+        #expect(old.name == "Groceries")
+        // And what 1.9 writes reads here without highlights
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let back = try JSONDecoder().decode(SyncedList.self, from: encoder.encode(old))
+        #expect(back.items.map(\.highlight) == [nil, nil])
+        #expect(back.items.map(\.text) == ["Milk", "Eggs"])
+        // A color from a later version that this one doesn't know reads as none, and the task still reads
+        let later = Data(#"{"id":"\#(UUID().uuidString)","text":"Milk","done":false,"highlight":"teal"}"#.utf8)
+        let task = try JSONDecoder().decode(ToDo.self, from: later)
+        #expect(task.text == "Milk")
+        #expect(task.highlight == nil)
     }
 
     @Test func readsTheDevicesCopiesFromAFolder() async throws {

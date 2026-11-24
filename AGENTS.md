@@ -82,6 +82,16 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 - **A text file opens as a list when it reads like one** (`Note.opened(fromText:file:)`): every line with something
   on it starts `[ ] ` or `[x] `, which is how `plainText` writes a list. Anything else opens as a note, so a file is
   never rewritten in another shape by Save. Converting a note to a list is looser (`tasks(fromText:)` takes any line).
+- **A highlight shades a task's whole line** (`ToDo.highlight`, a `Highlight`). The colors are numbers in
+  `Highlight` (Note.swift), shared with the iPhone: see-through `light` and `dark` shades over the usual background,
+  and solid `sticky` ones, since a see-through color on the sticky yellow goes muddy. `Look.color(of:)` makes them
+  into a color that follows the appearance. `ToDoRow.draw` fills `highlightFrame`, number and all, a point in from
+  the top and bottom so two highlighted tasks are two strokes. A right-click on a task (`ToDoRow.menu(for:)`) shows
+  `TodoList.highlightItems`, and so does a right-click in a task being edited: the field editor asks its delegate,
+  the `TaskField`, for its menu (`textView(_:menu:for:at:)`). `TodoList.highlight(_:with:)` registers an undo.
+  `ToDoRow.showHighlight` redraws without touching the text, so a highlight from another device doesn't end editing:
+  `TodoList.show` checks the task being edited with `readsLike`, which leaves the highlight out. Splitting a task with
+  Return gives the half below the highlight too, unless it's empty.
 - **Line numbers are a ruler.** Since macOS 14 views don't clip to their bounds, so the ruler and the scroll view's
   clip view set `clipsToBounds`, or the text view's background paints over the numbers. A list has no text view, so
   each `ToDoRow` has its own number label instead, sized and colored from the same `Look` values as the ruler.
@@ -136,6 +146,12 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
   stamped by `stamped(since:at:)` when the name differs, and the copy with the latest `nameChanged` wins. Starting to
   sync a named list stamps it. Both fields are optional and left out of the file when nil, so 1.7 (and the first
   iPhone builds) read and write copies as before: a copy without `nameChanged` never changes the name.
+- **A task's highlight syncs with a time of its own** (`ToDo.highlightChanged`), apart from `changed`, which is the
+  text and check. `stamped(since:at:)` stamps it when the highlight differs, `SyncMerge.decide` takes each task's
+  highlight from the copy with the latest `highlightChanged`, whichever copy its text came from, and a copy without
+  one never changes it. So a version before highlights (Mac 1.9, iPhone 1.0), which reads a copy without them and
+  writes its own back without them, can't take a color off, even when it changes the task's words. Both fields are
+  left out of the file when nil. An unknown color, from a later version, reads as none.
 - **New fields in a copy have to be optional.** Older versions skip keys they don't know, and `format` isn't checked,
   so a change that older versions can't skip would need a new folder layout, not just a new field.
 - **A sync folder isn't trusted.** Anything that can write to it can put a file there, and nothing signs a copy, so
@@ -223,7 +239,7 @@ setup and user guide.
 |---|---|
 | Launch, and syncing as YANA comes and goes | `YANAApp`, `AppModel.became` |
 | The lists, the folders, this iPhone's id and name, saving to `Lists.json`, Recently Deleted, Undo for deleted tasks, whether a list is syncing, a new device to offer lists to, and the lists other devices took off this iPhone | `AppModel` |
-| Editing a list: Return in a task, empty tasks, change times | `Note+Phone` |
+| Editing a list: Return in a task, empty tasks, highlights, change times | `Note+Phone` |
 | Syncing: reading the folders when they change, the same passes as the Mac (`SyncPass`), a folder's lists to bring here, joining them, and which device took a list off this iPhone | `PhoneSync` |
 | Reading and writing the folders, iCloud Drive downloads, skipping files that aren't what their names say or are too big | `PhoneFiles` |
 | A sync folder: its bookmark, and its paths | `Folders` |
@@ -238,6 +254,11 @@ setup and user guide.
   for it and reads it on a later pass, rather than waiting. One that's out of date is asked for and read as it is.
 - **Empty tasks aren't saved or synced**, as on the Mac. `Note.syncable` leaves them out, `Note.stamped(after:at:)`
   stamps a change made here without counting them, and `[ToDo].showing` keeps them in place when a merge comes in.
+- **Swiping a task right picks its highlight** (a leading swipe action, then `HighlightPicker` in a sheet), not
+  touching and holding it: a `.contextMenu` on a task took touch and hold from dragging (the drag UI test failed every
+  time with one). A row with swipe actions of its own gets no Delete from `.onDelete`, so the trailing swipe's Delete
+  is written out too. A task's row background (`Look.rowBackground`) is its highlight, from the same numbers as the
+  Mac's. The sample lists have a few, for screenshots.
 - **Return arrives as a new line in a task's text** (its `TextField` is vertical so long tasks wrap). `Note.enter`
   turns it into a new task the way Return works on the Mac.
 - **Starting to sync gives the list a new id**, as on the Mac. `AppModel` remembers the old id, so the list's screen

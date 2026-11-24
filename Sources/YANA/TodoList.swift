@@ -138,7 +138,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         let shown = before.map(\.item).showing(items)
 
         var stoppedEditing = false
-        if let row = editing, shown.first(where: { $0.id == row.item.id })?.looksLike(row.item) != true {
+        if let row = editing, shown.first(where: { $0.id == row.item.id })?.readsLike(row.item) != true {
             stopEditing(row)
             stoppedEditing = true
         }
@@ -149,10 +149,16 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         }
         let after: [ToDoRow] = shown.map { item in
             guard let row = have[item.id] else { return makeRow(item) }
-            let same = row.item.looksLike(item)
+            let reads = row.item.readsLike(item)
+            let same = reads && row.item.highlight == item.highlight
             row.item = item
-            // Not the one being edited, which looks the same: showing it again would end its editing
-            if !same { row.refresh() }
+            // Not the one being edited, which reads the same: showing its text again would end its editing. Its
+            // highlight can change without that.
+            if !reads {
+                row.refresh()
+            } else if !same {
+                row.showHighlight()
+            }
             return row
         }
         for row in before where !after.contains(where: { $0 === row }) {
@@ -425,6 +431,56 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
         return rows.first { $0.field === field }
     }
 
+    // MARK: Highlighting
+
+    /// What a right-click on a task shows: the highlighter colors, with a tick by the task's own, and Remove Highlight
+    func menu(for row: ToDoRow) -> NSMenu {
+        let menu = NSMenu()
+        highlightItems(for: row).forEach(menu.addItem)
+        return menu
+    }
+
+    /// The highlighter colors for a task, as menu items. A right-click in a task being edited shows them too, above
+    /// Cut, Copy and Paste.
+    func highlightItems(for row: ToDoRow) -> [NSMenuItem] {
+        var items = [NSMenuItem.sectionHeader(title: "Highlight")]
+        for color in Highlight.allCases {
+            let item = NSMenuItem(title: color.name, action: #selector(highlightChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = HighlightChoice(row: row, color: color)
+            item.image = color.swatch
+            item.state = row.item.highlight == color ? .on : .off
+            items.append(item)
+        }
+        // Taken off with nothing to take off is no choice at all
+        let off = NSMenuItem(title: "Remove Highlight",
+                             action: row.item.highlight == nil ? nil : #selector(highlightChosen(_:)),
+                             keyEquivalent: "")
+        off.target = self
+        off.representedObject = HighlightChoice(row: row, color: nil)
+        off.isEnabled = row.item.highlight != nil
+        items.append(off)
+        return items
+    }
+
+    @objc private func highlightChosen(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? HighlightChoice, let row = choice.row else { return }
+        highlight(row, with: choice.color)
+    }
+
+    /// Shades a task's line with a highlighter color, or with nil, takes its highlight off. Undo puts back what it had.
+    func highlight(_ row: ToDoRow, with color: Highlight?) {
+        guard row.superview === stack, row.item.highlight != color else { return }
+        let before = row.item.highlight
+        row.item.highlight = color
+        row.showHighlight()
+        onChange?()
+        undo.registerUndo(withTarget: self) { list in
+            MainActor.assumeIsolated { list.highlight(row, with: before) }
+        }
+        undo.setActionName(color == nil ? "Remove Highlight" : "Highlight")
+    }
+
     // MARK: Clicking and dragging
 
     /// A click below the tasks goes to adding one
@@ -504,11 +560,14 @@ final class ToDoRow: NSView {
     /// The space between a checkbox, its task's text, and the ×
     static let spacing: CGFloat = 4
 
-    /// Highlights it while it's being dragged
+    /// How round the corners of its highlight are, and of the tint it has while it's dragged
+    private static let corner: CGFloat = 4
+
+    /// Tints it while it's being dragged
     var isLifted = false {
         didSet {
             wantsLayer = true
-            layer?.cornerRadius = 4
+            layer?.cornerRadius = Self.corner
             layer?.backgroundColor = isLifted ? NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor : nil
         }
     }
@@ -523,6 +582,7 @@ final class ToDoRow: NSView {
         TodoList.alignLeading(checkbox)
 
         field.onFocus = { [unowned self] in self.list?.startedEditing(self) }
+        field.editingMenuItems = { [unowned self] in self.list?.highlightItems(for: self) ?? [] }
 
         numberLabel.setAccessibilityElement(false)
 
@@ -578,7 +638,6 @@ final class ToDoRow: NSView {
     /// Shows the task as it is: crossed out with a × when it's done
     func refresh() {
         checkbox.state = item.done ? .on : .off
-        checkbox.setAccessibilityLabel(item.text)
         deleteButton.isHidden = !item.done
         if item.done {
             toEdge.isActive = false
@@ -602,6 +661,38 @@ final class ToDoRow: NSView {
         field.font = look.font
         field.textColor = look.textColor
         field.attributedStringValue = NSAttributedString(string: item.text, attributes: attributes)
+        showHighlight()
+    }
+
+    /// Shades its line in its highlight's color, or takes the shade off, without touching its text, so a task being
+    /// edited stays edited
+    func showHighlight() {
+        needsDisplay = true
+        let highlight = item.highlight.map { ", \($0.name.lowercased()) highlight" } ?? ""
+        checkbox.setAccessibilityLabel(item.text + highlight)
+    }
+
+    /// Where its highlight is: the whole line, number and all, with a little room above and below so two highlighted
+    /// tasks are two strokes, and in from the note's edge
+    var highlightFrame: NSRect {
+        NSRect(x: 3, y: 1, width: max(0, bounds.width - 3), height: max(0, bounds.height - 2))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let highlight = item.highlight else { return }
+        look.color(of: highlight).setFill()
+        NSBezierPath(roundedRect: highlightFrame, xRadius: Self.corner, yRadius: Self.corner).fill()
+    }
+
+    /// The light and dark colors are different, and drawn again when the note changes between them
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    /// A right-click shows the highlighter colors
+    override func menu(for event: NSEvent) -> NSMenu? {
+        list?.menu(for: self)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -630,6 +721,8 @@ final class ToDoRow: NSView {
 @MainActor
 final class TaskField: NSTextField {
     var onFocus: (() -> Void)?
+    /// Goes at the top of the menu a right-click shows while it's being edited: its task's highlighter colors
+    var editingMenuItems: (() -> [NSMenuItem])?
     /// The width its height was last worked out for
     private var fittedWidth: CGFloat = -1
 
@@ -677,6 +770,16 @@ final class TaskField: NSTextField {
         }
     }
 
+    /// The field editor's menu, with the highlighter colors on top. The field editor asks the field it's editing, as
+    /// its delegate.
+    @objc func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+        guard let items = editingMenuItems?(), !items.isEmpty else { return menu }
+        for (index, item) in (items + [.separator()]).enumerated() {
+            menu.insertItem(item, at: index)
+        }
+        return menu
+    }
+
     /// Grows and shrinks a line at a time as you type
     override func textDidChange(_ notification: Notification) {
         super.textDidChange(notification)
@@ -714,6 +817,17 @@ final class TaskField: NSTextField {
     static func lineHeight(_ font: NSFont?) -> CGFloat {
         let font = font ?? .systemFont(ofSize: NSFont.systemFontSize)
         return ceil(font.ascender - font.descender + font.leading)
+    }
+}
+
+/// What a highlight menu item does: which task, and which color, or none
+private final class HighlightChoice: NSObject {
+    weak var row: ToDoRow?
+    let color: Highlight?
+
+    init(row: ToDoRow, color: Highlight?) {
+        self.row = row
+        self.color = color
     }
 }
 

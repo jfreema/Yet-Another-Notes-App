@@ -315,14 +315,15 @@ extension Note {
     }
 
     /// The list as it starts syncing through a folder, from `device` to `devices` as well. It gets a new id, so nothing
-    /// left in the folder from an earlier time it synced mixes in, every task counts as changed now, and a name it
-    /// already has goes with it.
+    /// left in the folder from an earlier time it synced mixes in, every task and highlight counts as changed now, and a
+    /// name it already has goes with it.
     func startingToSync(in folder: String, from device: String, to devices: [String], at now: Date) -> Note {
         var note = syncable
         note.id = UUID()
         note.items = note.items.map { item in
             var item = item
             item.changed = now
+            item.highlightChanged = item.highlight == nil ? nil : now
             return item
         }
         note.sync = SyncInfo(folder: folder, devices: [device] + devices, devicesChanged: now, orderChanged: now,

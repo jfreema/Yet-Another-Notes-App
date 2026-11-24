@@ -65,6 +65,40 @@ struct Look {
     }
 
     static let lineNumberMargin: CGFloat = 8
+
+    /// A highlighted task's line: see-through over the usual background, in light or dark mode as the note is, and
+    /// solid on a sticky note
+    func color(of highlight: Highlight) -> NSColor {
+        if sticky { return NSColor(highlight.sticky) }
+        return NSColor(name: nil) { appearance in
+            NSColor(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? highlight.dark : highlight.light)
+        }
+    }
+}
+
+extension NSColor {
+    convenience init(_ shade: Highlight.Shade) {
+        self.init(srgbRed: shade.red, green: shade.green, blue: shade.blue, alpha: shade.alpha)
+    }
+}
+
+extension Highlight {
+    /// A dot of the color, as the highlighter's own ink, for a menu
+    var swatch: NSImage {
+        let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            let dot = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
+            var ink = light
+            ink.alpha = 1
+            NSColor(ink).setFill()
+            dot.fill()
+            NSColor(white: 0, alpha: 0.2).setStroke()
+            dot.lineWidth = 0.5
+            dot.stroke()
+            return true
+        }
+        image.accessibilityDescription = name
+        return image
+    }
 }
 
 extension NSColor {

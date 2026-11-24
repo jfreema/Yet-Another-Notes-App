@@ -261,6 +261,12 @@ final class AppModel {
         change(list) { $0.items.move(fromOffsets: offsets, toOffset: destination) }
     }
 
+    /// Shades a task's line with a highlighter color, or with nil, takes its highlight off. A synced list's highlights
+    /// go to the other devices.
+    func highlight(_ task: UUID, in list: UUID, with color: Highlight?) {
+        change(list) { $0.highlight(task, with: color) }
+    }
+
     func clearChecked(in list: UUID) {
         removeTasks(in: list) { note in Array(note.items.indices).filter { note.items[$0].done } }
     }
@@ -621,11 +627,12 @@ final class AppModel {
         let sync = SyncInfo(folder: folder.id, devices: [device], devicesChanged: now, orderChanged: now, deleted: [:])
         lists = [
             Note(kind: .list, items: [
-                ToDo(text: "Book flights for the conference", done: true),
-                ToDo(text: "Renew passport"),
-                ToDo(text: "Ask Sam about the budget review, and send the slides from last week's meeting"),
+                ToDo(text: "Book flights for the conference", done: true, highlight: .blue),
+                ToDo(text: "Renew passport", highlight: .yellow),
+                ToDo(text: "Ask Sam about the budget review, and send the slides from last week's meeting",
+                     highlight: .blue),
                 ToDo(text: "Pick up dry cleaning", done: true),
-                ToDo(text: "Call the dentist"),
+                ToDo(text: "Call the dentist", highlight: .pink),
             ], name: "This Week", sync: sync),
             Note(kind: .list, items: [ToDo(text: "Milk"), ToDo(text: "Eggs", done: true), ToDo(text: "Coffee beans"),
                                       ToDo(text: "Lemons"), ToDo(text: "Sourdough", done: true)],

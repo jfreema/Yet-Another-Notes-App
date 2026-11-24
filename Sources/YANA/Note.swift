@@ -152,7 +152,8 @@ struct Note: Codable, Equatable, Sendable {
 
     /// The list with change times for what's different from `before`, an earlier copy of it: a task that's new or edited
     /// is stamped `now`, one that's gone is marked deleted at `now`, the order is marked changed if it isn't the same, and
-    /// so is the name. Only a synced list keeps change times.
+    /// so is the name. A task whose highlight is new or different gets its own time for that. Only a synced list keeps
+    /// change times.
     func stamped(since before: Note, at now: Date) -> Note {
         guard var sync else { return self }
         var stamped = self
@@ -166,6 +167,14 @@ struct Note: Codable, Equatable, Sendable {
                 item.changed = old.changed ?? item.changed ?? now
             } else {
                 item.changed = now
+            }
+            // Its highlight has a time of its own, so a change to it and a change to the words on another device both
+            // stand
+            if let old = earlier[item.id] {
+                item.highlightChanged = old.highlight == item.highlight
+                    ? old.highlightChanged ?? item.highlightChanged : now
+            } else if item.highlight != nil {
+                item.highlightChanged = now
             }
             // Back again, say by Undo
             sync.deleted[item.id.uuidString] = nil
@@ -194,20 +203,33 @@ struct ToDo: Codable, Equatable, Sendable {
     var done: Bool
     /// When its text or check last changed, kept once its list syncs. The latest change wins when two devices differ.
     var changed: Date?
+    /// The highlighter color its line is shaded with, if it has one
+    var highlight: Highlight?
+    /// When its highlight was last given, changed or taken off, kept once its list syncs. The latest one wins, apart
+    /// from the text and check. A copy without it, such as one from a version before highlights, never changes one.
+    var highlightChanged: Date?
 
-    init(id: UUID = UUID(), text: String, done: Bool = false, changed: Date? = nil) {
+    init(id: UUID = UUID(), text: String, done: Bool = false, changed: Date? = nil, highlight: Highlight? = nil,
+         highlightChanged: Date? = nil) {
         self.id = id
         self.text = text
         self.done = done
         self.changed = changed
+        self.highlight = highlight
+        self.highlightChanged = highlightChanged
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, text, done, changed
+        case id, text, done, changed, highlight, highlightChanged
     }
 
-    /// Whether it shows the same as `other`: the same task, with the same text and check
+    /// Whether it shows the same as `other`: the same task, with the same text, check and highlight
     func looksLike(_ other: ToDo) -> Bool {
+        readsLike(other) && highlight == other.highlight
+    }
+
+    /// Whether it says the same as `other`: the same task, with the same text and check, highlighted alike or not
+    func readsLike(_ other: ToDo) -> Bool {
         id == other.id && text == other.text && done == other.done
     }
 
@@ -225,11 +247,11 @@ struct ToDo: Codable, Equatable, Sendable {
         let before = text.substring(to: start).replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
         let after = text.substring(from: end).replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
         guard !before.isEmpty else { return nil }
-        // Splitting a checked task leaves both halves checked, but a new empty task isn't done yet. The first half is
-        // still this task.
+        // Splitting a checked or highlighted task leaves both halves that way, but a new empty task isn't done or
+        // highlighted yet. The first half is still this task.
         var kept = self
         kept.text = before
-        return (kept, ToDo(text: after, done: done && !after.isEmpty))
+        return (kept, ToDo(text: after, done: done && !after.isEmpty, highlight: after.isEmpty ? nil : highlight))
     }
 
     init(from decoder: Decoder) throws {
@@ -238,6 +260,68 @@ struct ToDo: Codable, Equatable, Sendable {
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         done = try container.decodeIfPresent(Bool.self, forKey: .done) ?? false
         changed = try? container.decodeIfPresent(Date.self, forKey: .changed)
+        // A color from a later version that this one doesn't have reads as none
+        highlight = try? container.decodeIfPresent(Highlight.self, forKey: .highlight)
+        highlightChanged = try? container.decodeIfPresent(Date.self, forKey: .highlightChanged)
+    }
+}
+
+/// A highlighter color, which shades a task's whole line. The Mac and the iPhone show the same colors, from these
+/// numbers: see-through in light and dark mode, so they sit on the usual background either way, and solid on a sticky
+/// note, whose yellow would muddy them.
+enum Highlight: String, Codable, CaseIterable, Sendable {
+    // Around the color wheel from yellow, the usual highlighter
+    case yellow, green, blue, purple, pink, orange
+
+    /// What it's called in menus
+    var name: String { rawValue.capitalized }
+
+    /// sRGB red, green and blue from 0 to 1, and how opaque it is
+    struct Shade: Equatable, Sendable {
+        var red, green, blue, alpha: Double
+
+        init(_ red: Double, _ green: Double, _ blue: Double, _ alpha: Double = 1) {
+            self.red = red / 255
+            self.green = green / 255
+            self.blue = blue / 255
+            self.alpha = alpha
+        }
+    }
+
+    /// Over the white of light mode
+    var light: Shade {
+        switch self {
+        case .yellow: Shade(255, 224, 0, 0.5)
+        case .green: Shade(100, 215, 60, 0.38)
+        case .blue: Shade(60, 170, 255, 0.32)
+        case .purple: Shade(170, 90, 230, 0.28)
+        case .pink: Shade(255, 60, 150, 0.28)
+        case .orange: Shade(255, 150, 0, 0.4)
+        }
+    }
+
+    /// Over the near black of dark mode
+    var dark: Shade {
+        switch self {
+        case .yellow: Shade(255, 214, 10, 0.4)
+        case .green: Shade(60, 200, 80, 0.36)
+        case .blue: Shade(64, 156, 255, 0.38)
+        case .purple: Shade(175, 90, 235, 0.4)
+        case .pink: Shade(255, 55, 140, 0.36)
+        case .orange: Shade(255, 140, 0, 0.4)
+        }
+    }
+
+    /// On a sticky note's yellow, solid
+    var sticky: Shade {
+        switch self {
+        case .yellow: Shade(255, 216, 50)
+        case .green: Shade(186, 232, 160)
+        case .blue: Shade(170, 214, 250)
+        case .purple: Shade(222, 196, 245)
+        case .pink: Shade(255, 186, 214)
+        case .orange: Shade(255, 196, 120)
+        }
     }
 }
 
