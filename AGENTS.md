@@ -64,6 +64,10 @@ The Mac app must build with the Command Line Tools alone, without Xcode. YANA fo
 - **Deleting a task waits a turn** (`perform(_:with:afterDelay:)`), since its × or text is still handling the event.
   `TodoList.delete` then registers the same undo as Clear Checked. A task emptied to delete it comes back as it was
   when its editing began (`ToDoRow.textBefore`), and one that never had anything in it just goes.
+- **A checked task's × stays clear of the scroll bar** (`ToDoRow.deleteInset`). The scroll bar shows over the list's
+  right edge while it scrolls and takes the clicks there, so a × at the edge scrolled the list when it was clicked, or
+  deleted a task when the scroll bar was reached for. The × is also wider to click than its mark (`deleteWidth`).
+  `TodoListTests` check both against the scroll bar's width.
 - **A task's text wraps** (`TaskField`). Its `intrinsicContentSize` is the height its cell needs at the width it has,
   so a task's height follows from a layout pass that gave it a width, and settles on the pass after. Tests lay out
   more than once for that. While a task is edited, a copy of the cell measures what's in the field editor, so the

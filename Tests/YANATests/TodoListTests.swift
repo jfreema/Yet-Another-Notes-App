@@ -66,6 +66,33 @@ struct TodoListTests {
         }
     }
 
+    @Test func theDeleteButtonStaysClearOfTheScrollBar() throws {
+        let list = TodoList(items: [ToDo(text: "Milk"), ToDo(text: long, done: true), ToDo(text: "Eggs", done: true)])
+        _ = show(list)
+        let milk = try #require(row("Milk", in: list))
+        let tall = try #require(row(long, in: list))
+        let eggs = try #require(row("Eggs", in: list))
+        // Only a checked task has one
+        #expect(milk.deleteButton.isHidden)
+        #expect(!eggs.deleteButton.isHidden)
+
+        // A scroll bar shows over the list's right edge, and takes the clicks there. The × is left of the wider kind,
+        // with room between them.
+        let scrollBar = max(NSScroller.scrollerWidth(for: .regular, scrollerStyle: .overlay),
+                            NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
+        for row in [tall, eggs] {
+            let button = row.deleteButton.convert(row.deleteButton.bounds, to: list)
+            #expect(button.maxX <= list.bounds.maxX - scrollBar - 6)
+            // Big enough to click, and the task's text ends before it
+            #expect(button.width >= 20)
+            #expect(button.height >= 12)
+            #expect(row.field.frame.maxX <= row.deleteButton.frame.minX)
+        }
+        // On the first line of a task that wraps, level with its checkbox
+        #expect(tall.field.frame.height >= TaskField.lineHeight(tall.field.font) * 3)
+        #expect(abs(tall.deleteButton.frame.midY - tall.checkbox.frame.midY) < 0.5)
+    }
+
     @Test func aTaskWrapsAgainWhenTheNoteIsMadeWider() throws {
         let list = TodoList(items: [ToDo(text: long)])
         let window = show(list)

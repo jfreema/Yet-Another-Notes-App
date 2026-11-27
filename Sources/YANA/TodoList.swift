@@ -31,7 +31,7 @@ final class TodoList: NSView, NotePage, NSTextFieldDelegate {
     private var tracking = false
 
     /// The space at the list's right side. The numbers make the space on the left.
-    private static let inset: CGFloat = 8
+    static let inset: CGFloat = 8
 
     init(items: [ToDo]) {
         super.init(frame: .zero)
@@ -546,7 +546,7 @@ final class ToDoRow: NSView {
     var textBefore: String?
     private let numberLabel = NSTextField(labelWithString: "")
     private lazy var numberWidth = numberLabel.widthAnchor.constraint(equalToConstant: 0)
-    private let deleteButton = NSButton()
+    let deleteButton = NSButton()
     /// The text runs to the ×, or to the row's edge when there isn't one
     private lazy var toDelete = field.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor,
                                                                 constant: -Self.spacing)
@@ -559,6 +559,13 @@ final class ToDoRow: NSView {
     static let gutterGap: CGFloat = 4
     /// The space between a checkbox, its task's text, and the ×
     static let spacing: CGFloat = 4
+    /// How wide the × is to click, which is wider than its mark, so a click meant for it doesn't land beside it
+    static let deleteWidth: CGFloat = 22
+    /// How far in from the row's right edge the × is. A scroll bar shows over the list's right edge while it scrolls,
+    /// and takes the clicks there, so a × at the edge was under it: a click on the × could scroll the list, and a
+    /// click meant for the scroll bar could delete a task. This, with the list's own `inset`, keeps the × clear of
+    /// the scroll bar with room to spare.
+    static let deleteInset: CGFloat = 16
 
     /// How round the corners of its highlight are, and of the tint it has while it's dragged
     private static let corner: CGFloat = 4
@@ -608,7 +615,10 @@ final class ToDoRow: NSView {
             checkbox.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor,
                                               constant: Look.lineNumberMargin + Self.gutterGap),
             field.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: Self.spacing),
-            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.deleteInset),
+            deleteButton.widthAnchor.constraint(equalToConstant: Self.deleteWidth),
+            // As tall as the checkbox and level with it, so it stays on the first line too
+            deleteButton.heightAnchor.constraint(equalTo: checkbox.heightAnchor),
             deleteButton.centerYAnchor.constraint(equalTo: checkbox.centerYAnchor),
         ])
         refresh()
