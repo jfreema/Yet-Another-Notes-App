@@ -1,0 +1,74 @@
+[0/1] Planning build
+Building for debugging...
+[0/6] Write sources
+[2/6] Write swift-version-7974D3F7F03D5E95.txt
+[4/8] Emitting module YANA
+[5/8] Compiling YANA TodoList.swift
+[6/10] Compiling YANA NoteWindow.swift
+[7/10] Compiling YANA ListSync.swift
+[7/12] Write Objects.LinkFileList
+[8/12] Linking YANA
+[9/12] Applying YANA
+[11/17] Compiling YANATests ShotTests.swift
+[12/17] Compiling YANATests SyncTests.swift
+[13/18] Emitting module YANATests
+[14/18] Compiling YANATests ListSyncTests.swift
+[15/18] Compiling YANATests NoteWindowTests.swift
+[16/18] Compiling YANATests TodoListTests.swift
+[16/18] Write Objects.LinkFileList
+[17/18] Linking YANAPackageTests
+Build complete! (20.25s)
+Test Suite 'Selected tests' started at 2026-11-27 19:03:04.004.
+Test Suite 'YANAPackageTests.xctest' started at 2026-11-27 19:03:04.007.
+Test Suite 'YANAPackageTests.xctest' passed at 2026-11-27 19:03:04.007.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-11-27 19:03:04.007.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.003) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite ShotTests started.
+◇ Test shots() started.
+SHOT before: preferred scroller style 0, overlay width 17.0, legacy width 17.0, list (365.0, 305.0), clip (0.0, 0.0, 348.0, 305.0)
+SHOT before: × of 'Check the te' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT before: × of 'Charge the l' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT before: × of 'Ask Sam abou' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 53.0, checkbox (33.0, 35.0, 18.0, 16.0)
+SHOT before: × of 'Marshmallows' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT before: × of 'Download the' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT before: × of 'Rain jackets' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT before: × of 'Water the pl' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT before: scroller frame (348.0, 7.5, 17.0, 297.5), style 1, hidden false, alpha 1.0
+SHOT before: legacy scroller frame (348.0, 7.5, 17.0, 297.5), clip (0.0, 0.0, 348.0, 305.0)
+SHOT before: screencapture ended 0
+✔ Test shots() passed after 3.348 seconds.
+✔ Suite ShotTests passed after 3.349 seconds.
+✔ Test run with 1 test in 1 suite passed after 3.349 seconds.
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version-7974D3F7F03D5E95.txt
+Build complete! (0.36s)
+Test Suite 'Selected tests' started at 2026-11-27 19:03:09.960.
+Test Suite 'YANAPackageTests.xctest' started at 2026-11-27 19:03:09.966.
+Test Suite 'YANAPackageTests.xctest' passed at 2026-11-27 19:03:09.966.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-11-27 19:03:09.966.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.007) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite ShotTests started.
+◇ Test shots() started.
+SHOT before-sticky: preferred scroller style 0, overlay width 17.0, legacy width 17.0, list (365.0, 305.0), clip (0.0, 0.0, 348.0, 305.0)
+SHOT before-sticky: × of 'Check the te' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT before-sticky: × of 'Charge the l' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT before-sticky: × of 'Ask Sam abou' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 74.0, checkbox (33.0, 52.0, 18.0, 16.0)
+SHOT before-sticky: × of 'Marshmallows' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT before-sticky: × of 'Download the' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT before-sticky: × of 'Rain jackets' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT before-sticky: × of 'Water the pl' x 329.0...340.0 (25.0 from the edge), 11.0 by 11.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT before-sticky: scroller frame (348.0, 7.5, 17.0, 297.5), style 1, hidden false, alpha 1.0
+SHOT before-sticky: legacy scroller frame (348.0, 7.5, 17.0, 297.5), clip (0.0, 0.0, 348.0, 305.0)
+SHOT before-sticky: screencapture ended 0
+✔ Test shots() passed after 2.832 seconds.
+✔ Suite ShotTests passed after 2.834 seconds.
+✔ Test run with 1 test in 1 suite passed after 2.834 seconds.

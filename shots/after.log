@@ -1,0 +1,100 @@
+Building for debugging...
+[0/11] /Users/runner/work/Yet-Another-Notes-App/Yet-Another-Notes-App/.build/arm64-apple-macosx/debug/YANAPackageTests.derived/runner.swift
+[1/11] Write sources
+[3/11] Write YANA-entitlement.plist
+[5/11] Write swift-version-7974D3F7F03D5E95.txt
+[7/26] Compiling YANA MenuBarIcon.swift
+[8/26] Compiling YANA Note.swift
+[9/26] Compiling YANA NoteStore.swift
+[10/26] Compiling YANA NoteWindow.swift
+[11/26] Compiling YANA Pages.swift
+[12/26] Compiling YANA SyncFormat.swift
+[13/26] Compiling YANA SyncModel.swift
+[14/32] Emitting module YANA
+[15/32] Compiling YANA AppDelegate.swift
+[16/32] Compiling YANA FolderWatcher.swift
+[17/32] Compiling YANA HotKey.swift
+[18/32] Compiling YANA LineIndex.swift
+[19/32] Compiling YANA LineNumbers.swift
+[20/32] Compiling YANA ListSync.swift
+[21/32] Compiling YANA MainMenu.swift
+[22/32] Compiling YANA SyncPass.swift
+[23/32] Compiling YANA SyncSheet.swift
+[24/32] Compiling YANA TabBar.swift
+[25/32] Compiling YANA TodoList.swift
+[26/32] Compiling YANA Updater.swift
+[27/32] Compiling YANA YANA.swift
+[27/32] Write Objects.LinkFileList
+[28/32] Linking YANA
+[29/32] Applying YANA
+[31/41] Compiling YANATests HotKeyTests.swift
+[32/41] Compiling YANATests LineIndexTests.swift
+[33/41] Compiling YANATests ListSyncTests.swift
+[34/41] Compiling YANATests MenuBarIconTests.swift
+[35/41] Compiling YANATests NoteTests.swift
+[36/41] Compiling YANATests NoteWindowTests.swift
+[37/41] Compiling YANATests ShotTests.swift
+[38/41] Compiling YANATests SyncPassTests.swift
+[39/41] Emitting module YANATests
+[40/44] Compiling YANATests SyncTests.swift
+[41/44] Compiling YANATests TodoListTests.swift
+[42/44] Compiling YANATests UpdaterTests.swift
+[43/46] Compiling YANAPackageTests runner.swift
+[44/46] Emitting module YANAPackageTests
+[44/46] Write Objects.LinkFileList
+[45/46] Linking YANAPackageTests
+Build complete! (64.30s)
+Test Suite 'Selected tests' started at 2026-11-27 19:02:24.912.
+Test Suite 'YANAPackageTests.xctest' started at 2026-11-27 19:02:24.918.
+Test Suite 'YANAPackageTests.xctest' passed at 2026-11-27 19:02:24.918.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-11-27 19:02:24.918.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.006) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite ShotTests started.
+◇ Test shots() started.
+SHOT after: preferred scroller style 1, overlay width 17.0, legacy width 17.0, list (365.0, 309.0), clip (0.0, 0.0, 365.0, 309.0)
+SHOT after: × of 'Check the te' x 319.0...341.0 (24.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT after: × of 'Charge the l' x 319.0...341.0 (24.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT after: × of 'Ask Sam abou' x 319.0...341.0 (24.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 53.0, checkbox (33.0, 35.0, 18.0, 16.0)
+SHOT after: × of 'Marshmallows' x 319.0...341.0 (24.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT after: × of 'Download the' x 319.0...341.0 (24.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT after: × of 'Rain jackets' x 319.0...341.0 (24.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT after: × of 'Water the pl' x 319.0...341.0 (24.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 19.0, checkbox (33.0, 1.0, 18.0, 16.0)
+SHOT after: scroller frame (348.0, 7.5, 17.0, 301.5), style 0, hidden false, alpha 1.0
+SHOT after: legacy scroller frame (348.0, 7.5, 17.0, 297.5), clip (0.0, 0.0, 348.0, 305.0)
+SHOT after: screencapture ended 0
+✔ Test shots() passed after 3.826 seconds.
+✔ Suite ShotTests passed after 3.827 seconds.
+✔ Test run with 1 test in 1 suite passed after 3.827 seconds.
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version-7974D3F7F03D5E95.txt
+Build complete! (0.31s)
+Test Suite 'Selected tests' started at 2026-11-27 19:02:37.602.
+Test Suite 'YANAPackageTests.xctest' started at 2026-11-27 19:02:37.607.
+Test Suite 'YANAPackageTests.xctest' passed at 2026-11-27 19:02:37.607.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-11-27 19:02:37.607.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.005) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite ShotTests started.
+◇ Test shots() started.
+SHOT after-sticky: preferred scroller style 0, overlay width 17.0, legacy width 17.0, list (365.0, 305.0), clip (0.0, 0.0, 348.0, 305.0)
+SHOT after-sticky: × of 'Check the te' x 302.0...324.0 (41.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT after-sticky: × of 'Charge the l' x 302.0...324.0 (41.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT after-sticky: × of 'Ask Sam abou' x 302.0...324.0 (41.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 74.0, checkbox (33.0, 52.0, 18.0, 16.0)
+SHOT after-sticky: × of 'Marshmallows' x 302.0...324.0 (41.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT after-sticky: × of 'Download the' x 302.0...324.0 (41.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT after-sticky: × of 'Rain jackets' x 302.0...324.0 (41.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT after-sticky: × of 'Water the pl' x 302.0...324.0 (41.0 from the edge), 22.0 by 20.0, mark (11.0, 7.0), row 27.0, checkbox (33.0, 5.0, 18.0, 16.0)
+SHOT after-sticky: scroller frame (348.0, 7.5, 17.0, 297.5), style 1, hidden false, alpha 1.0
+SHOT after-sticky: legacy scroller frame (348.0, 7.5, 17.0, 297.5), clip (0.0, 0.0, 348.0, 305.0)
+SHOT after-sticky: screencapture ended 0
+✔ Test shots() passed after 3.241 seconds.
+✔ Suite ShotTests passed after 3.242 seconds.
+✔ Test run with 1 test in 1 suite passed after 3.242 seconds.
